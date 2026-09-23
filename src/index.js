@@ -55,10 +55,12 @@ async function bootstrap() {
 
   // Graceful Shutdown
   const handleExit = (signal) => {
-    logger.warn(`Menerima sinyal ${signal}. Menutup proses secara rapi...`);
-    server.close(() => {
-      process.exit(0);
-    });
+    logger.warn(`Menerima sinyal ${signal}. Menutup proses...`);
+    try {
+      server.close();
+      server.closeAllConnections?.();
+    } catch {}
+    process.exit(0);
   };
 
   process.on('SIGINT', () => handleExit('SIGINT'));
