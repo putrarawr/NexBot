@@ -3,6 +3,8 @@
   "prefix": ".",
   "adminPassword": "admin123",
   "ownerNumber": "",
+  "selfMode": true,
+  "autocomplete": true,
   "features": {
     "game": true,
     "osint": true,

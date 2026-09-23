@@ -3,7 +3,14 @@ import { getConfig } from '../config.js';
 import { checkRateLimit, createReplyHelper } from './antiBan.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
-
+import {
+  findSuggestions,
+  formatAutocompleteMessage,
+  formatPrefixOnlyHelper,
+  getPendingAutocomplete,
+  setPendingAutocomplete,
+  clearPendingAutocomplete,
+} from './autocomplete.js';
 export const commands = new Map();
 export const aliases = new Map();
 
@@ -37,8 +44,7 @@ export async function messageHandler(sock, chatUpdate) {
     if (!messages || messages.length === 0) return;
 
     const msg = messages[0];
-    if (!msg.message || msg.key.fromMe) return;
-
+    if (!msg.message) return;
     // Filter pesan status/broadcast WA
     const remoteJid = msg.key.remoteJid;
     if (remoteJid === 'status@broadcast') return;
@@ -61,6 +67,16 @@ export async function messageHandler(sock, chatUpdate) {
 
     const reply = createReplyHelper(sock, remoteJid, msg);
     const config = getConfig();
+    const prefix = config.prefix || '.';
+
+    // Dukungan Self-Chat (Kirim perintah dari nomor bot sendiri atau Chat ke Diri Sendiri)
+    if (msg.key.fromMe) {
+      // Hanya izinkan jika fitur selfMode aktif dan pesan diawali prefix
+      // (mencegah loop tak berujung jika bot mengirim balasan obrolan biasa)
+      if (config.selfMode === false || !text.startsWith(prefix)) {
+        return;
+      }
+    }
 
     // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini
     const gameIntercepted = await handleGameInput({
@@ -77,9 +93,42 @@ export async function messageHandler(sock, chatUpdate) {
       return; // Pesan adalah jawaban game, tidak perlu diproses sebagai command
     }
 
-    // 2. Cek apakah pesan diawali dengan prefix (default '.')
-    const prefix = config.prefix || '.';
+    // 2. Cek apakah user sedang memilih angka balasan autocomplete (1 - 5)
+    const pendingAuto = getPendingAutocomplete(remoteJid);
+    if (pendingAuto && /^[1-5]$/.test(text)) {
+      const choiceIdx = parseInt(text, 10) - 1;
+      if (choiceIdx >= 0 && choiceIdx < pendingAuto.suggestions.length) {
+        const selectedCmd = pendingAuto.suggestions[choiceIdx];
+        clearPendingAutocomplete(remoteJid);
+
+        logger.bot(`Autocomplete dipilih: ${prefix}${selectedCmd.name} oleh ${pushName}`);
+        incrementCommandStat(selectedCmd.category);
+
+        await selectedCmd.execute({
+          sock,
+          msg,
+          jid: remoteJid,
+          sender,
+          pushName,
+          command: selectedCmd.name,
+          args: [],
+          fullText: '',
+          reply,
+          config,
+          prefix,
+        });
+        return;
+      }
+    }
+
+    // 3. Cek apakah pesan diawali dengan prefix (default '.')
     if (!text.startsWith(prefix)) return;
+
+    // Jika user hanya mengetik prefix saja (misal "." atau ".?")
+    if (text === prefix || text === `${prefix}?` || text === `${prefix}help`) {
+      await reply(formatPrefixOnlyHelper(prefix));
+      return;
+    }
 
     const withoutPrefix = text.slice(prefix.length).trim();
     const [rawCmd, ...args] = withoutPrefix.split(/\s+/);
@@ -90,7 +139,15 @@ export async function messageHandler(sock, chatUpdate) {
     const command = commands.get(resolvedName);
 
     if (!command) {
-      // Command tidak dikenali
+      // Autocomplete & "Did You Mean?" Suggestion
+      if (config.autocomplete !== false) {
+        const suggestions = findSuggestions(cmdName, commands);
+        if (suggestions.length > 0) {
+          setPendingAutocomplete(remoteJid, suggestions);
+          await reply(formatAutocompleteMessage(prefix, cmdName, suggestions));
+          return;
+        }
+      }
       return;
     }
 

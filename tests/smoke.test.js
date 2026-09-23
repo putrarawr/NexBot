@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { initConfig, getConfig, updateConfig } from '../src/config.js';
 import { initDatabase, addScore, getLeaderboard, getStats, getUser } from '../src/utils/database.js';
-import { commands, registerCommand } from '../src/bot/handler.js';
+import { commands, registerCommand, messageHandler } from '../src/bot/handler.js';
+import { findSuggestions, levenshteinDistance } from '../src/bot/autocomplete.js';
 import { createWebServer } from '../src/web/server.js';
 import { TicTacToeSession } from '../src/modules/game/tictactoe.js';
 import { tebakGambarList, tebakKataList, asahOtakList, generateMathProblem } from '../src/modules/game/questions.js';
@@ -118,6 +119,61 @@ async function runAllTests() {
     for (const cmd of expectedCommands) {
       assert.ok(commands.has(cmd), `Command ${cmd} should be registered`);
     }
+  });
+
+  // 4b. Autocomplete & Self-Chat Mode Tests
+  console.log('\n🔍 4b. Autocomplete & Self-Chat Mode:');
+  await test('Levenshtein distance detects typos accurately', () => {
+    assert.equal(levenshteinDistance('githb', 'github'), 1);
+    assert.equal(levenshteinDistance('menu', 'menu'), 0);
+  });
+
+  await test('findSuggestions finds prefix and fuzzy matches', () => {
+    const tebakMatches = findSuggestions('tebak', commands);
+    assert.ok(tebakMatches.length >= 2);
+    assert.ok(tebakMatches.some((c) => c.name === 'tebakgambar'));
+    assert.ok(tebakMatches.some((c) => c.name === 'tebakkata'));
+
+    const typoMatches = findSuggestions('githb', commands);
+    assert.ok(typoMatches.some((c) => c.name === 'github'));
+  });
+
+  await test('Self-Chat Mode processes commands with fromMe: true', async () => {
+    let replyCount = 0;
+    let lastReply = '';
+    const fakeSock = {
+      sendPresenceUpdate: async () => {},
+      sendMessage: async (jid, content) => {
+        replyCount++;
+        lastReply = content.text;
+      },
+    };
+
+    // Case 1: fromMe: true with prefix -> MUST execute
+    await messageHandler(fakeSock, {
+      messages: [
+        {
+          key: { fromMe: true, remoteJid: '628999999999@s.whatsapp.net' },
+          message: { conversation: '.ping' },
+        },
+      ],
+      type: 'notify',
+    });
+    assert.ok(replyCount >= 1, 'Self-chat command should be processed');
+    assert.ok(lastReply.includes('Pong') || lastReply.includes('Kecepatan'));
+
+    // Case 2: fromMe: true without prefix -> MUST NOT execute
+    replyCount = 0;
+    await messageHandler(fakeSock, {
+      messages: [
+        {
+          key: { fromMe: true, remoteJid: '628999999999@s.whatsapp.net' },
+          message: { conversation: 'Halo lagi ngapain?' },
+        },
+      ],
+      type: 'notify',
+    });
+    assert.equal(replyCount, 0, 'Self-chat ordinary message should be ignored');
   });
 
   // 5. Web Server & REST API Tests

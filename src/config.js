@@ -12,6 +12,8 @@ const DEFAULT_CONFIG = {
   prefix: process.env.PREFIX || '.',
   adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
   ownerNumber: process.env.OWNER_NUMBER || '',
+  selfMode: true,
+  autocomplete: true,
   features: {
     game: true,
     osint: true,

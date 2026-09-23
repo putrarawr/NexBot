@@ -365,6 +365,51 @@
             </label>
           </div>
 
+          <!-- Feature 5: Self-Chat Mode -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                  <i data-lucide="user-check" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Self-Chat Mode (Nomor Sendiri)</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Memungkinkan bot merespon perintah yang kamu ketik di ruang obrolan nomor sendiri ("Message Yourself") atau dari HP yang terhubung.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">Chat ke Diri Sendiri</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">fromMe Enabled</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-selfmode" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <!-- Feature 6: Smart Autocomplete -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  <i data-lucide="sparkle" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Smart Autocomplete ("Did You Mean?")</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Memberikan saran cerdas jika perintah salah ketik (typo) atau tidak lengkap, dan memungkinkan memilih perintah via angka 1-5.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">Fuzzy Matching</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">Ketik Angka 1-5</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-autocomplete" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -692,8 +737,9 @@
           document.getElementById('toggle-osint').checked = data.config.features.osint !== false;
           document.getElementById('toggle-ai').checked = data.config.features.ai !== false;
           document.getElementById('toggle-programming').checked = data.config.features.programming !== false;
+          document.getElementById('toggle-selfmode').checked = data.config.selfMode !== false;
+          document.getElementById('toggle-autocomplete').checked = data.config.autocomplete !== false;
           document.getElementById('configAiProvider').value = data.config.aiProvider || 'hybrid';
-        }
 
       } catch (err) {
         console.warn('Gagal memuat status bot:', err);
@@ -796,7 +842,9 @@
           osint: document.getElementById('toggle-osint').checked,
           ai: document.getElementById('toggle-ai').checked,
           programming: document.getElementById('toggle-programming').checked,
-        }
+        },
+        selfMode: document.getElementById('toggle-selfmode').checked,
+        autocomplete: document.getElementById('toggle-autocomplete').checked,
       };
 
       try {

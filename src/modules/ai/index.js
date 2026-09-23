@@ -96,9 +96,25 @@ export async function askAI(prompt, systemInstruction = '', options = {}) {
       }
     }
   } catch (err) {
-    logger.error('Error saat menghubungi Pollinations Free AI:', err.message);
+    logger.warn('Error saat menghubungi Pollinations POST:', err.message);
   }
 
+  // 3b. Fallback via GET Request
+  try {
+    const getUrl = `https://text.pollinations.ai/${encodeURIComponent(prompt)}`;
+    const getRes = await fetch(getUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (getRes.ok) {
+      const text = await getRes.text();
+      if (text && text.trim()) {
+        return text.trim();
+      }
+    }
+  } catch (err) {
+    logger.warn('Error saat menghubungi Pollinations GET:', err.message);
+  }
   throw new Error('Semua provider AI sedang tidak dapat dijangkau. Coba beberapa saat lagi.');
 }
 
