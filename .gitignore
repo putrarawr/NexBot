@@ -4,3 +4,4 @@ data/auth/
 data/keepalive.log
 *.log
 .DS_Store
+bin/
