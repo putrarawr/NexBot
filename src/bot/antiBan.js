@@ -1,9 +1,40 @@
 import { logger } from '../utils/logger.js';
 
+// Outgoing bot messages tracker (membedakan pesan otomatis bot vs user mengetik di HP sendiri)
+const botSentMessageIds = new Set();
+
+export function registerBotSentMessage(messageId) {
+  if (!messageId) return;
+  botSentMessageIds.add(messageId);
+  if (botSentMessageIds.size > 2000) {
+    const iter = botSentMessageIds.values();
+    for (let i = 0; i < 500; i++) {
+      botSentMessageIds.delete(iter.next().value);
+    }
+  }
+}
+
+export function isBotSentMessage(messageId) {
+  return messageId ? botSentMessageIds.has(messageId) : false;
+}
+
+export async function safeSendMessage(sock, jid, content, options = {}) {
+  try {
+    if (!sock || !jid) return null;
+    const sent = await sock.sendMessage(jid, content, options);
+    if (sent?.key?.id) {
+      registerBotSentMessage(sent.key.id);
+    }
+    return sent;
+  } catch (err) {
+    logger.error(`Gagal mengirim pesan ke ${jid}: ${err.message}`);
+    return null;
+  }
+}
+
 // Cooldown tracker per sender JID (in milliseconds)
 const userCooldowns = new Map();
 const COOLDOWN_MS = 2500; // 2.5 detik
-
 export function checkRateLimit(senderJid) {
   const now = Date.now();
   const lastTime = userCooldowns.get(senderJid);
@@ -55,8 +86,7 @@ export function createReplyHelper(sock, jid, quotedMsg = null) {
         quoted: options.quoted !== false ? quotedMsg : undefined,
         ...options,
       };
-
-      return await sock.sendMessage(jid, messagePayload, sendOptions);
+      return await safeSendMessage(sock, jid, messagePayload, sendOptions);
     } catch (err) {
       logger.error(`Gagal mengirim pesan balasan ke ${jid}: ${err.message}`);
       return null;

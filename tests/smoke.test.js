@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { initConfig, getConfig, updateConfig } from '../src/config.js';
-import { initDatabase, addScore, getLeaderboard, getStats, getUser } from '../src/utils/database.js';
+import { initDatabase, addScore, getLeaderboard, getStats, getUser, activeGames } from '../src/utils/database.js';
 import { commands, registerCommand, messageHandler } from '../src/bot/handler.js';
 import { findSuggestions, levenshteinDistance } from '../src/bot/autocomplete.js';
 import { createWebServer } from '../src/web/server.js';
@@ -77,6 +77,15 @@ async function runAllTests() {
 
     const math = generateMathProblem();
     assert.ok(math.question && math.answer);
+  });
+
+  await test('Tebak Gambar image URLs are active and reachable (HTTP 200)', async () => {
+    assert.ok(tebakGambarList.length >= 10);
+    const testItems = tebakGambarList.slice(0, 3);
+    for (const item of testItems) {
+      const res = await fetch(item.image, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      assert.equal(res.status, 200, `Image ${item.image} should return HTTP 200`);
+    }
   });
 
   await test('TicTacToe game engine plays and calculates winner', () => {
@@ -174,6 +183,27 @@ async function runAllTests() {
       type: 'notify',
     });
     assert.equal(replyCount, 0, 'Self-chat ordinary message should be ignored');
+
+    // Case 3: fromMe: true answering active game (WITHOUT prefix) -> MUST answer and win!
+    activeGames.set('628999999999@s.whatsapp.net', {
+      type: 'tebakgambar',
+      answer: 'TANTANGAN SERU',
+      reward: 50,
+      timer: setTimeout(() => {}, 10000),
+    });
+
+    replyCount = 0;
+    await messageHandler(fakeSock, {
+      messages: [
+        {
+          key: { id: 'user_phone_msg_1', fromMe: true, remoteJid: '628999999999@s.whatsapp.net' },
+          message: { conversation: 'tantangan seru' }, // Jawaban tanpa titik!
+        },
+      ],
+      type: 'notify',
+    });
+    assert.ok(replyCount >= 1, 'Self-chat answering active game without prefix should win');
+    assert.ok(lastReply.includes('BENAR SEKALI'), 'Should announce correct answer');
   });
 
   // 5. Web Server & REST API Tests

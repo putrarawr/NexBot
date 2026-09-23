@@ -3,6 +3,8 @@ import { activeGames, addScore, getLeaderboard, getUser } from '../../utils/data
 import { tebakGambarList, tebakKataList, asahOtakList, generateMathProblem } from './questions.js';
 import { TicTacToeSession } from './tictactoe.js';
 import { logger } from '../../utils/logger.js';
+import { safeSendMessage } from '../../bot/antiBan.js';
+import { levenshteinDistance } from '../../bot/autocomplete.js';
 
 export async function handleGameInput({ sock, msg, jid, sender, pushName, text, reply }) {
   const active = activeGames.get(jid);
@@ -20,7 +22,13 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
 
   // 1. Handling Kuis / Teka-Teki (Tebak Gambar, Tebak Kata, Asah Otak, Math)
   if (['tebakgambar', 'tebakkata', 'asahotak', 'math'].includes(active.type)) {
-    const isCorrect = normalizedInput === active.answer.toLowerCase();
+    const cleanInput = normalizedInput.replace(/[^a-z0-9]/g, '');
+    const cleanAnswer = active.answer.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const isExact = cleanInput === cleanAnswer;
+    // Jika panjang jawaban >= 6 huruf, beri toleransi typo 1 huruf (misal "kacang polng")
+    const distance = cleanAnswer.length >= 6 ? levenshteinDistance(cleanInput, cleanAnswer) : (isExact ? 0 : 99);
+    const isCorrect = isExact || distance === 1;
 
     if (isCorrect) {
       clearTimeout(active.timer);
@@ -39,12 +47,12 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
       await reply(winMsg);
       return true;
     } else {
-      // Jawaban salah, jika ada clue beri hint
-      if (active.type === 'math') {
-        // Pada math jangan spam respon salah kecuali diminta
-        return false;
+      // Jika jawaban hampir benar (jarak 2 huruf), beri hint penyemangat
+      if (distance === 2 && active.type !== 'math') {
+        await reply(`🤏 *Dikit lagi!* Jawabanmu sudah hampir benar!`);
+        return true;
       }
-      return false; // Biarkan chat mengalir tanpa mengganggu pesan non-jawaban
+      return false;
     }
   }
 
@@ -137,17 +145,36 @@ export function registerGameCommands() {
       caption += `Balas chat ini langsung dengan tebakanmu! (Ketik \`${prefix}nyerah\` jika pasrah)`;
 
       try {
-        await sock.sendMessage(jid, {
+        const imgRes = await fetch(item.image, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          signal: AbortSignal.timeout(8000),
+        });
+
+        if (imgRes.ok) {
+          const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+          await safeSendMessage(sock, jid, {
+            image: imgBuffer,
+            caption,
+            mimetype: 'image/jpeg',
+          });
+          return;
+        }
+      } catch (err) {
+        logger.warn('Gagal download buffer tebakgambar, mencoba via URL:', err.message);
+      }
+
+      // Fallback kirim via URL
+      try {
+        await safeSendMessage(sock, jid, {
           image: { url: item.image },
           caption,
         });
       } catch (err) {
-        // Fallback jika fetch gambar eksternal gagal
-        await reply(`${caption}\n\n_(Gambar: ${item.image})_`);
+        logger.error('Gagal mengirim gambar tebakgambar:', err.message);
+        await reply(`${caption}\n\n⚠️ _(Gambar: ${item.image})_`);
       }
     },
   });
-
   // Command: Tebak Kata
   registerCommand({
     name: 'tebakkata',

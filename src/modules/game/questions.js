@@ -2,31 +2,85 @@
 
 export const tebakGambarList = [
   {
-    image: 'https://telegra.ph/file/0c934301be85324e94119.jpg',
-    answer: 'TUKANG BUBUR AYAM',
-    clue: 'T_K_NG B_B_R _Y_M',
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-1.jpg',
+    answer: 'TANTANGAN SERU',
+    clue: 'T_NT_NG_N S_R_',
   },
   {
-    image: 'https://telegra.ph/file/1897c6407dd98faae2f46.jpg',
-    answer: 'KACANG POLONG',
-    clue: 'K_C_NG P_L_NG',
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-2.jpg',
+    answer: 'TENAGA LISTRIK',
+    clue: 'T_N_G_ L_STR_K',
   },
   {
-    image: 'https://telegra.ph/file/343ad5fb18a93901b0f5b.jpg',
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-3.jpg',
+    answer: 'SARUNG BANTAL',
+    clue: 'S_R_NG B_NT_L',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-4.jpg',
+    answer: 'ALAS KAKI',
+    clue: '_L_S K_K_',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-5.jpg',
+    answer: 'POTONGAN HARGA',
+    clue: 'P_T_NG_N H_RG_',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-6.jpg',
+    answer: 'MINUM JAMU',
+    clue: 'M_N_M J_M_',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-7.jpg',
+    answer: 'JAMU KUAT',
+    clue: 'J_M_ K__T',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-8.jpg',
     answer: 'PISAU TAJAM',
     clue: 'P_S__ T_J_M',
   },
   {
-    image: 'https://telegra.ph/file/d867c4bf7c2cb45a557b7.jpg',
-    answer: 'LAMPU MERAH',
-    clue: 'L_MP_ M_R_H',
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-9.jpg',
+    answer: 'OBAT NYAMUK',
+    clue: '_B_T NY_M_K',
   },
   {
-    image: 'https://telegra.ph/file/857e49226cb9da4d12c01.jpg',
-    answer: 'JAM TANGAN',
-    clue: 'J_M T_NG_N',
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-10.jpg',
+    answer: 'KUCING BELANG',
+    clue: 'K_C_NG B_L_NG',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-11.jpg',
+    answer: 'TUKANG BUBUR',
+    clue: 'T_K_NG B_B_R',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-12.jpg',
+    answer: 'KAMBING GULING',
+    clue: 'K_MB_NG G_L_NG',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-13.jpg',
+    answer: 'KERTAS KOSONG',
+    clue: 'K_RT_S K_S_NG',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-14.jpg',
+    answer: 'BUNGA MAWAR',
+    clue: 'B_NG_ M_W_R',
+  },
+  {
+    image: 'https://www.cademedia.com/wp-content/uploads/2020/12/tebak-gambar-level-1-nomor-15.jpg',
+    answer: 'SURAT EDARAN',
+    clue: 'S_R_T _D_R_N',
   },
 ];
+
+export function makeClue(word) {
+  return word.replace(/[AEIOUaeiou]/g, '_');
+}
 
 export const tebakKataList = [
   {

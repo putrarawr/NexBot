@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../config.js';
-import { checkRateLimit, createReplyHelper } from './antiBan.js';
+import { checkRateLimit, createReplyHelper, isBotSentMessage } from './antiBan.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import {
@@ -45,6 +45,13 @@ export async function messageHandler(sock, chatUpdate) {
 
     const msg = messages[0];
     if (!msg.message) return;
+
+    // Abaikan pesan otomatis yang dihasilkan oleh bot itu sendiri
+    const messageId = msg.key?.id;
+    if (messageId && isBotSentMessage(messageId)) {
+      return;
+    }
+
     // Filter pesan status/broadcast WA
     const remoteJid = msg.key.remoteJid;
     if (remoteJid === 'status@broadcast') return;
@@ -69,56 +76,57 @@ export async function messageHandler(sock, chatUpdate) {
     const config = getConfig();
     const prefix = config.prefix || '.';
 
-    // Dukungan Self-Chat (Kirim perintah dari nomor bot sendiri atau Chat ke Diri Sendiri)
-    if (msg.key.fromMe) {
-      // Hanya izinkan jika fitur selfMode aktif dan pesan diawali prefix
-      // (mencegah loop tak berujung jika bot mengirim balasan obrolan biasa)
-      if (config.selfMode === false || !text.startsWith(prefix)) {
-        return;
+    // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini!
+    // (Bisa dijawab oleh user lain ATAU pemilik bot di chat sendiri)
+    if (!msg.key.fromMe || config.selfMode !== false) {
+      const gameIntercepted = await handleGameInput({
+        sock,
+        msg,
+        jid: remoteJid,
+        sender,
+        pushName,
+        text,
+        reply,
+      });
+
+      if (gameIntercepted) {
+        return; // Pesan adalah jawaban game yang valid/sedang berlangsung
       }
-    }
-
-    // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini
-    const gameIntercepted = await handleGameInput({
-      sock,
-      msg,
-      jid: remoteJid,
-      sender,
-      pushName,
-      text,
-      reply,
-    });
-
-    if (gameIntercepted) {
-      return; // Pesan adalah jawaban game, tidak perlu diproses sebagai command
     }
 
     // 2. Cek apakah user sedang memilih angka balasan autocomplete (1 - 5)
-    const pendingAuto = getPendingAutocomplete(remoteJid);
-    if (pendingAuto && /^[1-5]$/.test(text)) {
-      const choiceIdx = parseInt(text, 10) - 1;
-      if (choiceIdx >= 0 && choiceIdx < pendingAuto.suggestions.length) {
-        const selectedCmd = pendingAuto.suggestions[choiceIdx];
-        clearPendingAutocomplete(remoteJid);
+    if (!msg.key.fromMe || config.selfMode !== false) {
+      const pendingAuto = getPendingAutocomplete(remoteJid);
+      if (pendingAuto && /^[1-5]$/.test(text)) {
+        const choiceIdx = parseInt(text, 10) - 1;
+        if (choiceIdx >= 0 && choiceIdx < pendingAuto.suggestions.length) {
+          const selectedCmd = pendingAuto.suggestions[choiceIdx];
+          clearPendingAutocomplete(remoteJid);
 
-        logger.bot(`Autocomplete dipilih: ${prefix}${selectedCmd.name} oleh ${pushName}`);
-        incrementCommandStat(selectedCmd.category);
+          logger.bot(`Autocomplete dipilih: ${prefix}${selectedCmd.name} oleh ${pushName}`);
+          incrementCommandStat(selectedCmd.category);
 
-        await selectedCmd.execute({
-          sock,
-          msg,
-          jid: remoteJid,
-          sender,
-          pushName,
-          command: selectedCmd.name,
-          args: [],
-          fullText: '',
-          reply,
-          config,
-          prefix,
-        });
-        return;
+          await selectedCmd.execute({
+            sock,
+            msg,
+            jid: remoteJid,
+            sender,
+            pushName,
+            command: selectedCmd.name,
+            args: [],
+            fullText: '',
+            reply,
+            config,
+            prefix,
+          });
+          return;
+        }
       }
+    }
+
+    // 3. Jika pesan dari nomor sendiri tapi bukan game/angka, HANYA proses jika diawali prefix
+    if (msg.key.fromMe && (config.selfMode === false || !text.startsWith(prefix))) {
+      return;
     }
 
     // 3. Cek apakah pesan diawali dengan prefix (default '.')
