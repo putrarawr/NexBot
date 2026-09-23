@@ -37,29 +37,28 @@ export async function checkGroupSpamKick({ sock, jid, sender, isGroup, reply, co
 
   // Jika mengirim 4 pesan atau lebih dalam 3.5 detik, hitung sebagai SPAM
   if (record.timestamps.length >= 4) {
-    // Reset buffer timestamp agar tidak dobel hitung dalam milidetik yang sama
     record.timestamps = [];
     record.strikes += 1;
 
     // Strike 1: Peringatan Pertama
     if (record.strikes === 1) {
       record.lastWarningTime = now;
-      await reply(`⚠️ @${senderNumber} Jangan spam! *(Peringatan 1/3)*`, {
-        mentions: [sender],
-      });
-      return true; // Intercept pesan spam
-    }
-
-    // Strike 2: Peringatan Keras
-    if (record.strikes === 2) {
-      record.lastWarningTime = now;
-      await reply(`🚨 @${senderNumber} *Peringatan 2/3!* Sekali lagi spam kamu beneran di-kick dari grup!`, {
+      await reply(`[!] @${senderNumber} Jangan spam! (Peringatan 1/3)`, {
         mentions: [sender],
       });
       return true;
     }
 
-    // Strike 3: KICK & AUTO RE-ADD DALAM 8 DETIK
+    // Strike 2: Peringatan Keras
+    if (record.strikes === 2) {
+      record.lastWarningTime = now;
+      await reply(`[!] @${senderNumber} Peringatan 2/3! Sekali lagi spam kamu akan dikeluarkan dari grup!`, {
+        mentions: [sender],
+      });
+      return true;
+    }
+
+    // Strike 3: KICK & AUTO RE-ADD
     if (record.strikes >= 3) {
       record.isKicking = true;
 
@@ -72,7 +71,7 @@ export async function checkGroupSpamKick({ sock, jid, sender, isGroup, reply, co
         const isTargetAdmin = targetMember && (targetMember.admin === 'admin' || targetMember.admin === 'superadmin');
 
         if (!isBotAdmin) {
-          await reply(`⚠️ @${senderNumber} terdeteksi spam berkali-kali!\n💡 _Jadikan bot sebagai Admin grup agar pelaku spam bisa di-kick otomatis wkwk._`, {
+          await reply(`[!] @${senderNumber} terdeteksi spam berkali-kali.\nJadikan bot sebagai Admin grup agar sistem kick otomatis berfungsi.`, {
             mentions: [sender],
           });
           record.strikes = 0;
@@ -81,7 +80,7 @@ export async function checkGroupSpamKick({ sock, jid, sender, isGroup, reply, co
         }
 
         if (isTargetAdmin) {
-          await reply(`⚠️ @${senderNumber} kamu terdeteksi spam, tapi kamu adalah Admin grup jadi tidak bisa di-kick!`, {
+          await reply(`[!] @${senderNumber} terdeteksi spam, namun berstatus Admin grup sehingga tidak dapat dikeluarkan.`, {
             mentions: [sender],
           });
           record.strikes = 0;
@@ -94,9 +93,9 @@ export async function checkGroupSpamKick({ sock, jid, sender, isGroup, reply, co
         await sock.groupParticipantsUpdate(jid, [sender], 'remove');
 
         const delaySec = config.reAddDelaySec || 8;
-        let kickMsg = `👢 *WKWK KENA KICK!*\n\n`;
-        kickMsg += `@${senderNumber} dikeluarkan dari grup karena spam berkali-kali! 💨\n\n`;
-        kickMsg += `⏳ Tenang, akan dimasukkan kembali dalam *${delaySec} detik* sebagai efek jera 🤣`;
+        let kickMsg = `[SANKSI SPAM]\n\n`;
+        kickMsg += `@${senderNumber} dikeluarkan dari grup karena spam berkali-kali.\n\n`;
+        kickMsg += `Akan dimasukkan kembali secara otomatis dalam ${delaySec} detik.`;
 
         await reply(kickMsg, { mentions: [sender] });
 
@@ -105,14 +104,14 @@ export async function checkGroupSpamKick({ sock, jid, sender, isGroup, reply, co
           try {
             logger.bot(`[ANTI-SPAM] Memasukkan kembali @${senderNumber} ke grup ${jid}`);
             await sock.groupParticipantsUpdate(jid, [sender], 'add');
-            await reply(`👋 @${senderNumber} Selamat datang kembali! Jangan diulangi spamnya ya wkwk ✌️`, {
+            await reply(`[+] @${senderNumber} telah dimasukkan kembali ke grup. Harap tidak mengulangi spam.`, {
               mentions: [sender],
             });
           } catch (addErr) {
             logger.warn(`Gagal auto re-add @${senderNumber}: ${addErr.message}`);
             try {
               const code = await sock.groupInviteCode(jid);
-              await reply(`ℹ️ Tidak bisa memasukkan @${senderNumber} langsung karena setelan privasi akun WA miliknya.\nMasuk kembali lewat link: https://chat.whatsapp.com/${code}`, {
+              await reply(`[!] Tidak dapat menambahkan @${senderNumber} langsung karena setelan privasi akun.\nSilakan masuk kembali melalui link: https://chat.whatsapp.com/${code}`, {
                 mentions: [sender],
               });
             } catch {}

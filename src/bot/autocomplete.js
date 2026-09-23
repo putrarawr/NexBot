@@ -1,6 +1,5 @@
-// Engine Autocomplete, Fuzzy Match ("Did You Mean?"), dan Quick Suggestion
+// Engine Autocomplete, Fuzzy Match ("Did You Mean?"), dan Quick Suggestion (No Emojis)
 
-// Levenshtein distance calculation untuk deteksi salah ketik (typo)
 export function levenshteinDistance(a, b) {
   const matrix = [];
   const lenA = a.length;
@@ -19,9 +18,9 @@ export function levenshteinDistance(a, b) {
         matrix[i][j] = matrix[i - 1][j - 1];
       } else {
         matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
+          matrix[i - 1][j - 1] + 1,
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1
         );
       }
     }
@@ -34,14 +33,13 @@ export function levenshteinDistance(a, b) {
 export const pendingAutocomplete = new Map();
 
 export function setPendingAutocomplete(jid, suggestions) {
-  // Batalkan timer sebelumnya jika ada
   if (pendingAutocomplete.has(jid)) {
     clearTimeout(pendingAutocomplete.get(jid).timer);
   }
 
   const timer = setTimeout(() => {
     pendingAutocomplete.delete(jid);
-  }, 45000); // 45 detik batas waktu memilih angka
+  }, 45000);
 
   pendingAutocomplete.set(jid, {
     suggestions,
@@ -74,30 +72,25 @@ export function findSuggestions(inputQuery, commandMap) {
     const name = cmd.name.toLowerCase();
     const aliases = (cmd.aliases || []).map((a) => a.toLowerCase());
 
-    // 1. Exact match (tidak perlu autocomplete jika persis)
     if (name === query || aliases.includes(query)) {
       return [{ cmd, score: 0, matchType: 'exact' }];
     }
 
-    // 2. Prefix Match (nama command diawali query, contoh: "te" -> "tebakgambar")
     if (name.startsWith(query)) {
       results.push({ cmd, score: 1, matchType: 'prefix' });
       continue;
     }
 
-    // 3. Alias Prefix Match
     if (aliases.some((a) => a.startsWith(query))) {
       results.push({ cmd, score: 1.5, matchType: 'alias_prefix' });
       continue;
     }
 
-    // 4. Substring Match (query ada di dalam nama command, contoh: "gambar" -> "tebakgambar")
     if (name.includes(query)) {
       results.push({ cmd, score: 2, matchType: 'substring' });
       continue;
     }
 
-    // 5. Fuzzy / Levenshtein Distance (untuk salah ketik, contoh: "tebk" -> "tebakkata")
     const dist = levenshteinDistance(query, name);
     const maxAllowedDist = Math.max(1, Math.floor(name.length / 3));
     if (dist <= maxAllowedDist) {
@@ -105,38 +98,34 @@ export function findSuggestions(inputQuery, commandMap) {
     }
   }
 
-  // Urutkan berdasarkan score relevansi terendah (paling mirip)
   results.sort((a, b) => a.score - b.score);
   return results.slice(0, 5).map((r) => r.cmd);
 }
 
 export function formatAutocompleteMessage(prefix, inputQuery, suggestions) {
-  const numberEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
-
-  let text = `🔍 Perintah \`${prefix}${inputQuery}\` tidak ditemukan.\n`;
-  text += `💡 *Pilihan Autocomplete Terdekat:*\n\n`;
+  let text = `[!] Perintah "${prefix}${inputQuery}" tidak ditemukan.\n`;
+  text += `[*] Rekomendasi Perintah:\n\n`;
 
   suggestions.forEach((cmd, idx) => {
-    const emoji = numberEmojis[idx] || `${idx + 1}.`;
-    text += `${emoji} \`${prefix}${cmd.name}\`\n`;
+    text += `[${idx + 1}] ${prefix}${cmd.name}\n`;
     if (cmd.description) {
-      text += `   └ _${cmd.description}_\n`;
+      text += `    - ${cmd.description}\n`;
     }
   });
 
-  text += `\n👉 *Ketik angka 1 sampai ${suggestions.length}* untuk langsung menjalankan perintah!`;
+  text += `\nKetik angka 1 sampai ${suggestions.length} untuk langsung menjalankan perintah.`;
   return text.trim();
 }
 
 export function formatPrefixOnlyHelper(prefix) {
-  let text = `⚡ *AUTOCOMPLETE & PENCARIAN CEPAT*\n\n`;
-  text += `Ketik \`${prefix}<huruf>\` untuk menemukan perintah secara cepat:\n`;
-  text += `• \`${prefix}te\` ➔ Kuis \`.tebakgambar\`, \`.tebakkata\`\n`;
-  text += `• \`${prefix}m\`  ➔ Kuis \`.math\`, \`.menu\`\n`;
-  text += `• \`${prefix}ip\` ➔ OSINT \`.ip\` (Geolocation IP)\n`;
-  text += `• \`${prefix}wh\` ➔ OSINT \`.whois\` (Domain WHOIS)\n`;
-  text += `• \`${prefix}ai\` ➔ Tanya Jawab AI (\`.ai\`, \`.explain\`)\n`;
-  text += `• \`${prefix}ru\` ➔ Eksekusi Kode (\`.run\`)\n\n`;
-  text += `Ketik \`${prefix}menu\` untuk membuka seluruh daftar perintah lengkap.`;
+  let text = `[*] PENCARIAN PERINTAH CEPAT\n\n`;
+  text += `Ketik ${prefix}<huruf> untuk mencari perintah, contoh:\n`;
+  text += `- ${prefix}te : Kuis ${prefix}tebakgambar, ${prefix}tebakkata\n`;
+  text += `- ${prefix}s  : Stiker ${prefix}sticker\n`;
+  text += `- ${prefix}tt : Downloader ${prefix}tiktok\n`;
+  text += `- ${prefix}ai : Tanya Jawab ${prefix}ai\n`;
+  text += `- ${prefix}ru : Eksekusi Kode ${prefix}run\n`;
+  text += `- ${prefix}m  : ${prefix}menu\n\n`;
+  text += `Ketik ${prefix}menu untuk melihat seluruh daftar perintah.`;
   return text.trim();
 }

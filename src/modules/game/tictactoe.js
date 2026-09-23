@@ -1,5 +1,3 @@
-const NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
-
 export class TicTacToeSession {
   constructor({ playerX, playerXName, playerO = null, playerOName = 'Bot', isVsBot = false }) {
     this.board = [1, 2, 3, 4, 5, 6, 7, 8, 9];
@@ -15,18 +13,18 @@ export class TicTacToeSession {
   }
 
   renderBoard() {
-    const symbols = this.board.map((val, idx) => {
-      if (val === 'X') return '❌';
-      if (val === 'O') return '⭕';
-      return NUMBER_EMOJIS[idx];
+    const symbols = this.board.map((val) => {
+      if (val === 'X') return '[ X ]';
+      if (val === 'O') return '[ O ]';
+      return `[ ${val} ]`;
     });
 
     return [
-      `  ${symbols[0]} │ ${symbols[1]} │ ${symbols[2]}`,
-      `  ───┼───┼───`,
-      `  ${symbols[3]} │ ${symbols[4]} │ ${symbols[5]}`,
-      `  ───┼───┼───`,
-      `  ${symbols[6]} │ ${symbols[7]} │ ${symbols[8]}`,
+      `  ${symbols[0]} | ${symbols[1]} | ${symbols[2]}`,
+      `  -------+-------+-------`,
+      `  ${symbols[3]} | ${symbols[4]} | ${symbols[5]}`,
+      `  -------+-------+-------`,
+      `  ${symbols[6]} | ${symbols[7]} | ${symbols[8]}`,
     ].join('\n');
   }
 
@@ -75,10 +73,10 @@ export class TicTacToeSession {
 
     // Periksa giliran
     if (this.currentTurn === 'X' && playerJid !== this.playerX) {
-      return { success: false, message: `Sekarang adalah giliran *${this.playerXName}* (❌)!` };
+      return { success: false, message: `Sekarang adalah giliran *${this.playerXName}* (X)!` };
     }
     if (this.currentTurn === 'O' && !this.isVsBot && playerJid !== this.playerO) {
-      return { success: false, message: `Sekarang adalah giliran *${this.playerOName}* (⭕)!` };
+      return { success: false, message: `Sekarang adalah giliran *${this.playerOName}* (O)!` };
     }
 
     // Lakukan langkah

@@ -28,10 +28,9 @@ export async function executeCode(language, code) {
   const compiler = COMPILER_MAP[language.toLowerCase()];
   if (!compiler) {
     const supported = Object.keys(COMPILER_MAP).join(', ');
-    throw new Error(`Bahasa *${language}* belum didukung.\nBahasa tersedia: ${supported}`);
+    throw new Error(`Bahasa "${language}" belum didukung.\nBahasa tersedia: ${supported}`);
   }
 
-  // Bersihkan markdown code fences jika ada (e.g. ```py ... ```)
   let cleanCode = code.trim();
   if (cleanCode.startsWith('```')) {
     cleanCode = cleanCode.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```$/, '');
@@ -83,40 +82,40 @@ export function registerProgrammingCommands() {
       const code = args.slice(1).join(' ');
 
       if (!language || !code) {
-        let help = `⚠️ *PANDUAN CODE RUNNER*\n\n`;
-        help += `Format: \`${prefix}run <bahasa> <code>\`\n\n`;
-        help += `*Bahasa Didukung:*\n`;
-        help += `• Python: \`${prefix}run py print("Halo Dunia!")\`\n`;
-        help += `• JavaScript: \`${prefix}run js console.log(1+1)\`\n`;
-        help += `• Go: \`${prefix}run go package main; import "fmt"; func main() { fmt.Println("Halo Go") }\`\n`;
-        help += `• PHP: \`${prefix}run php <?php echo "Halo PHP";\`\n`;
-        help += `• C++ / Rust / Java / Bash`;
+        let help = `[PANDUAN CODE RUNNER]\n\n`;
+        help += `Format: ${prefix}run <bahasa> <code>\n\n`;
+        help += `Bahasa Didukung:\n`;
+        help += `- Python: ${prefix}run py print("Halo Dunia!")\n`;
+        help += `- JavaScript: ${prefix}run js console.log(1+1)\n`;
+        help += `- Go: ${prefix}run go package main; import "fmt"; func main() { fmt.Println("Halo Go") }\n`;
+        help += `- PHP: ${prefix}run php <?php echo "Halo PHP";\n`;
+        help += `- C++, Rust, Java, Bash`;
         return reply(help);
       }
 
-      await reply(`⚙️ Menjalankan kode *${language.toUpperCase()}* di sandbox...`);
+      await reply(`[-] Menjalankan kode ${language.toUpperCase()} di sandbox...`);
 
       try {
         const result = await executeCode(language, code);
-        let out = `💻 *HASIL EKSEKUSI (${language.toUpperCase()})*\n\n`;
+        let out = `[HASIL EKSEKUSI (${language.toUpperCase()})]\n\n`;
 
         if (result.stdout) {
-          out += `📤 *Output:*\n\`\`\`\n${result.stdout.trim()}\n\`\`\`\n\n`;
+          out += `Output:\n\`\`\`\n${result.stdout.trim()}\n\`\`\`\n\n`;
         }
 
         if (result.stderr) {
-          out += `⚠️ *Error / Peringatan:*\n\`\`\`\n${result.stderr.trim()}\n\`\`\`\n\n`;
+          out += `Error/Peringatan:\n\`\`\`\n${result.stderr.trim()}\n\`\`\`\n\n`;
         }
 
         if (!result.stdout && !result.stderr) {
-          out += `ℹ️ _Program selesai tanpa menghasilkan output._\n\n`;
+          out += `Program selesai tanpa output.\n\n`;
         }
 
-        out += `⏱️ *Waktu:* ${result.duration}ms | *Status:* ${result.isSuccess ? '✅ Berhasil (Exit 0)' : `❌ Gagal (Exit ${result.exitCode})`}`;
+        out += `Waktu: ${result.duration}ms | Status: ${result.isSuccess ? 'Berhasil (Exit 0)' : `Gagal (Exit ${result.exitCode})`}`;
         await reply(out.trim());
       } catch (err) {
         logger.error('Error saat compile code:', err.message);
-        await reply(`❌ Eksekusi gagal: ${err.message}`);
+        await reply(`[!] Eksekusi gagal: ${err.message}`);
       }
     },
   });
@@ -130,7 +129,7 @@ export function registerProgrammingCommands() {
     usage: '.regex /pattern/flags <string>',
     async execute({ args, reply, prefix }) {
       if (args.length < 2) {
-        return reply(`⚠️ Format salah!\nContoh: \`${prefix}regex /[0-9]+/g user123 nomor 456\`\natau: \`${prefix}regex /@([a-z0-9_]+)/gi Halo @john_doe dan @alice\``);
+        return reply(`[!] Format salah.\nContoh: ${prefix}regex /[0-9]+/g user123 nomor 456\natau: ${prefix}regex /@([a-z0-9_]+)/gi Halo @john_doe dan @alice`);
       }
 
       const patternArg = args[0];
@@ -149,30 +148,30 @@ export function registerProgrammingCommands() {
         const regex = new RegExp(pattern, flags);
         const matches = [...testString.matchAll(regex)];
 
-        let out = `🔬 *REGEX TEST RESULT*\n\n`;
-        out += `🎯 *Pattern:* \`/${pattern}/${flags}\`\n`;
-        out += `📄 *String:* "${testString}"\n\n`;
+        let out = `[REGEX TEST RESULT]\n\n`;
+        out += `Pattern: /${pattern}/${flags}\n`;
+        out += `String: "${testString}"\n\n`;
 
         if (matches.length > 0) {
-          out += `✅ *Ditemukan Cocok:* ${matches.length} matches\n\n`;
+          out += `Ditemukan: ${matches.length} kecocokan\n\n`;
           matches.slice(0, 10).forEach((m, idx) => {
-            out += `*${idx + 1}.* Match: \`${m[0]}\` (Index: ${m.index})\n`;
+            out += `[${idx + 1}] Match: "${m[0]}" (Index: ${m.index})\n`;
             if (m.length > 1) {
               for (let g = 1; g < m.length; g++) {
-                out += `   └ Group ${g}: \`${m[g]}\`\n`;
+                out += `    - Group ${g}: "${m[g]}"\n`;
               }
             }
           });
           if (matches.length > 10) {
-            out += `\n_...dan ${matches.length - 10} kecocokan lainnya._`;
+            out += `\n...dan ${matches.length - 10} kecocokan lainnya.`;
           }
         } else {
-          out += `❌ *Tidak Ditemukan Kecocokan.*`;
+          out += `Tidak ditemukan kecocokan.`;
         }
 
         await reply(out.trim());
       } catch (err) {
-        await reply(`❌ Pattern Regex tidak valid: ${err.message}`);
+        await reply(`[!] Pattern Regex tidak valid: ${err.message}`);
       }
     },
   });
@@ -186,20 +185,20 @@ export function registerProgrammingCommands() {
     usage: '.json <string_json>',
     async execute({ fullText, reply, prefix }) {
       if (!fullText) {
-        return reply(`⚠️ Tempelkan teks JSON yang ingin diformat!\nContoh: \`${prefix}json {"nama":"Budi","umur":25,"aktif":true}\``);
+        return reply(`[!] Tempelkan teks JSON yang ingin diformat.\nContoh: ${prefix}json {"nama":"Budi","umur":25}`);
       }
 
       try {
         const parsed = JSON.parse(fullText);
         const formatted = JSON.stringify(parsed, null, 2);
 
-        let out = `✨ *JSON VALID & TERFORMAT:*\n\n`;
+        let out = `[JSON VALID]\n\n`;
         out += `\`\`\`json\n${formatted}\n\`\`\``;
         await reply(out);
       } catch (err) {
-        let out = `❌ *JSON TIDAK VALID!*\n\n`;
-        out += `Detail Error: _${err.message}_\n\n`;
-        out += `💡 *Tips:* Pastikan semua key menggunakan tanda kutip ganda (\`"key": "value"\`) dan koma tidak diletakkan di elemen terakhir.`;
+        let out = `[!] JSON TIDAK VALID\n\n`;
+        out += `Detail Error: ${err.message}\n\n`;
+        out += `Tips: Pastikan semua key menggunakan tanda kutip ganda ("key": "value") dan koma tidak diletakkan di elemen terakhir.`;
         await reply(out);
       }
     },
@@ -215,10 +214,10 @@ export function registerProgrammingCommands() {
     async execute({ args, reply, prefix }) {
       const query = args.join(' ').trim();
       if (!query) {
-        return reply(`⚠️ Masukkan topik atau perintah yang ingin dicari!\nContoh: \`${prefix}cheat git commit\` atau \`${prefix}cheat docker run\` atau \`${prefix}cheat chmod\``);
+        return reply(`[!] Masukkan topik atau perintah yang ingin dicari.\nContoh: ${prefix}cheat git commit atau ${prefix}cheat docker run`);
       }
 
-      await reply(`📖 Mencari cheatsheet untuk: *${query}*...`);
+      await reply(`[-] Mencari cheatsheet untuk: "${query}"...`);
 
       try {
         const url = `https://cheat.sh/${encodeURIComponent(query)}?qT`;
@@ -229,21 +228,18 @@ export function registerProgrammingCommands() {
 
         if (res.ok) {
           const raw = await res.text();
-          // Bersihkan escape ANSI sequences jika ada
           const clean = raw.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '').trim();
 
           if (clean && !clean.includes('Unknown topic') && clean.length > 10) {
-            // Potong jika terlalu panjang untuk batas chat WA
             const preview = clean.length > 2000 ? clean.slice(0, 1950) + '\n\n...(dipotong karena batas pesan)' : clean;
-            return await reply(`📚 *CHEATSHEET: ${query.toUpperCase()}*\n\n\`\`\`\n${preview}\n\`\`\``);
+            return await reply(`[CHEATSHEET: ${query.toUpperCase()}]\n\n\`\`\`\n${preview}\n\`\`\``);
           }
         }
 
-        // Fallback internal
-        await reply(`ℹ️ Cheatsheet untuk *${query}* tidak ditemukan di database online.`);
+        await reply(`[-] Cheatsheet untuk "${query}" tidak ditemukan.`);
       } catch (err) {
         logger.error('Error saat fetch cheatsheet:', err.message);
-        await reply('❌ Gagal mengambil cheatsheet dari server online.');
+        await reply('[!] Gagal mengambil cheatsheet dari server online.');
       }
     },
   });

@@ -2,10 +2,8 @@ import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
 
 export async function downloadTikTokVideo(tiktokUrl) {
-  // Bersihkan URL dari parameter tracking
   const cleanUrl = tiktokUrl.trim();
 
-  // API 1: TikWM (No Watermark)
   const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}`;
   const res = await fetch(apiUrl, {
     headers: {
@@ -28,7 +26,6 @@ export async function downloadTikTokVideo(tiktokUrl) {
     throw new Error('Tautan video tidak ditemukan pada hasil parsing.');
   }
 
-  // Unduh buffer video (batas maksimal 25 MB agar tidak boros RAM)
   const videoRes = await fetch(videoUrl, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     signal: AbortSignal.timeout(25000),
@@ -61,21 +58,21 @@ export function registerDownloaderCommands() {
       const url = urlMatch ? urlMatch[0] : null;
 
       if (!url) {
-        return reply(`⚠️ Masukkan tautan video TikTok!\nContoh: \`${prefix}tiktok https://vt.tiktok.com/xxxxxx/\``);
+        return reply(`[!] Masukkan tautan video TikTok.\nContoh: \`${prefix}tiktok https://vt.tiktok.com/xxxxxx/\``);
       }
 
-      await reply('⏳ _Sedang mengunduh video TikTok tanpa watermark..._');
+      await reply('[-] Sedang mengunduh video TikTok tanpa watermark...');
 
       try {
         const result = await downloadTikTokVideo(url);
 
-        let caption = `🎬 *TIKTOK DOWNLOADER*\n\n`;
-        caption += `👤 *Kreator:* ${result.author}\n`;
-        caption += `⏱️ *Durasi:* ${result.duration}s\n`;
+        let caption = `[TIKTOK DOWNLOADER]\n\n`;
+        caption += `Kreator: ${result.author}\n`;
+        caption += `Durasi: ${result.duration}s\n`;
         if (result.title) {
-          caption += `📝 *Deskripsi:* ${result.title.slice(0, 150)}\n\n`;
+          caption += `Deskripsi: ${result.title.slice(0, 150)}\n\n`;
         }
-        caption += `✨ _Unduhan berhasil tanpa watermark!_`;
+        caption += `Unduhan berhasil tanpa watermark.`;
 
         await sock.sendMessage(jid, {
           video: result.videoBuffer,
@@ -84,7 +81,7 @@ export function registerDownloaderCommands() {
         });
       } catch (err) {
         logger.error('Error saat download TikTok:', err.message);
-        await reply(`❌ Gagal mengunduh TikTok: ${err.message}`);
+        await reply(`[!] Gagal mengunduh TikTok: ${err.message}`);
       }
     },
   });

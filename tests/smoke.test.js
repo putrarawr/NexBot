@@ -214,6 +214,34 @@ async function runAllTests() {
     });
     assert.ok(replyCount >= 1, 'Self-chat answering active game without prefix should win');
     assert.ok(lastReply.includes('BENAR SEKALI'), 'Should announce correct answer');
+
+    // Case 4: Slash prefix '/ping' -> MUST execute
+    replyCount = 0;
+    await messageHandler(fakeSock, {
+      messages: [
+        {
+          key: { id: 'user_slash_1', fromMe: false, remoteJid: '628777777777@s.whatsapp.net' },
+          message: { conversation: '/ping' },
+        },
+      ],
+      type: 'notify',
+    });
+    assert.ok(replyCount >= 1, 'Slash command /ping should be executed');
+    assert.ok(lastReply.includes('Pong') || lastReply.includes('Kecepatan'));
+
+    // Case 5: Slash prefix only '/' -> MUST return search helper
+    replyCount = 0;
+    await messageHandler(fakeSock, {
+      messages: [
+        {
+          key: { id: 'user_slash_helper', fromMe: false, remoteJid: '628666666666@s.whatsapp.net' },
+          message: { conversation: '/' },
+        },
+      ],
+      type: 'notify',
+    });
+    assert.ok(replyCount >= 1, 'Slash only / should return helper');
+    assert.ok(lastReply.includes('PENCARIAN PERINTAH CEPAT'));
   });
 
   // 4c. Media & Sticker Tools Tests

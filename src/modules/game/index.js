@@ -13,10 +13,10 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
   const normalizedInput = text.trim().toLowerCase();
 
   // Opsi menyerah
-  if (normalizedInput === '.nyerah' || normalizedInput === 'nyerah') {
+  if (normalizedInput === '.nyerah' || normalizedInput === 'nyerah' || normalizedInput === '/nyerah') {
     clearTimeout(active.timer);
     activeGames.delete(jid);
-    await reply(`🏳️ Permainan dihentikan!\nJawaban yang benar adalah: *${active.answer}*`);
+    await reply(`[-] Permainan dihentikan.\nJawaban yang benar adalah: *${active.answer}*`);
     return true;
   }
 
@@ -26,7 +26,6 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
     const cleanAnswer = active.answer.toLowerCase().replace(/[^a-z0-9]/g, '');
 
     const isExact = cleanInput === cleanAnswer;
-    // Jika panjang jawaban >= 6 huruf, beri toleransi typo 1 huruf (misal "kacang polng")
     const distance = cleanAnswer.length >= 6 ? levenshteinDistance(cleanInput, cleanAnswer) : (isExact ? 0 : 99);
     const isCorrect = isExact || distance === 1;
 
@@ -37,19 +36,18 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
       const reward = active.reward || 50;
       const totalScore = addScore(sender, reward, pushName);
 
-      let winMsg = `🎉 *BENAR SEKALI!*\n\n`;
-      winMsg += `👤 Penjawab: *${pushName}*\n`;
-      winMsg += `🎯 Jawaban: *${active.answer}*\n`;
-      winMsg += `💰 Hadiah: *+${reward} Poin*\n`;
-      winMsg += `🏆 Total Poin: *${totalScore}*\n\n`;
-      winMsg += `Ketik \`.tebakgambar\` atau \`.math\` untuk bermain lagi!`;
+      let winMsg = `[+] BENAR SEKALI!\n\n`;
+      winMsg += `Penjawab: *${pushName}*\n`;
+      winMsg += `Jawaban: *${active.answer}*\n`;
+      winMsg += `Hadiah: *+${reward} Poin*\n`;
+      winMsg += `Total Poin: *${totalScore}*\n\n`;
+      winMsg += `Ketik .tebakgambar atau .math untuk bermain lagi.`;
 
       await reply(winMsg);
       return true;
     } else {
-      // Jika jawaban hampir benar (jarak 2 huruf), beri hint penyemangat
       if (distance === 2 && active.type !== 'math') {
-        await reply(`🤏 *Dikit lagi!* Jawabanmu sudah hampir benar!`);
+        await reply(`[-] Dikit lagi! Jawabanmu sudah hampir benar.`);
         return true;
       }
       return false;
@@ -58,13 +56,12 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
 
   // 2. Handling Tic-Tac-Toe
   if (active.type === 'tictactoe') {
-    // Cek apakah input berupa digit 1-9
     if (/^[1-9]$/.test(text.trim())) {
       const session = active.session;
       const move = session.makeMove(text.trim(), sender);
 
       if (!move.success) {
-        await reply(`⚠️ ${move.message}`);
+        await reply(`[!] ${move.message}`);
         return true;
       }
 
@@ -75,7 +72,7 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
         activeGames.delete(jid);
 
         if (move.isDraw) {
-          await reply(`🎮 *TIC-TAC-TOE SERI!*\n\n${boardRender}\n\nPermainan berakhir seimbang!`);
+          await reply(`[TIC-TAC-TOE] Permainan Seri!\n\n${boardRender}\n\nHasil akhir seimbang.`);
         } else {
           const winnerName = move.winner === 'X' ? session.playerXName : session.playerOName;
           const winnerJid = move.winner === 'X' ? session.playerX : session.playerO;
@@ -84,22 +81,20 @@ export async function handleGameInput({ sock, msg, jid, sender, pushName, text, 
             bonus = addScore(winnerJid, 75, winnerName);
           }
 
-          let endMsg = `🏆 *PEMENANG TIC-TAC-TOE!*\n\n`;
+          let endMsg = `[TIC-TAC-TOE] Pemenang: *${winnerName}* (${move.winner})!\n\n`;
           endMsg += `${boardRender}\n\n`;
-          endMsg += `Selamat kepada *${winnerName}* (${move.winner === 'X' ? '❌' : '⭕'})!\n`;
-          if (winnerJid) endMsg += `💰 Hadiah: *+75 Poin* (Total: ${bonus})`;
+          if (winnerJid) endMsg += `Hadiah: +75 Poin (Total: ${bonus})`;
           await reply(endMsg);
         }
         return true;
       }
 
-      // Game berlanjut
       const nextPlayer = session.currentTurn === 'X' ? session.playerXName : session.playerOName;
-      const nextIcon = session.currentTurn === 'X' ? '❌' : '⭕';
-      let turnMsg = `🎮 *TIC-TAC-TOE*\n\n`;
+      const nextIcon = session.currentTurn;
+      let turnMsg = `[TIC-TAC-TOE]\n\n`;
       turnMsg += `${boardRender}\n\n`;
       turnMsg += `Giliran: *${nextPlayer}* (${nextIcon})\n`;
-      turnMsg += `Ketik angka *1-9* untuk melangkah.`;
+      turnMsg += `Ketik angka 1-9 untuk melangkah.`;
       await reply(turnMsg);
       return true;
     }
@@ -118,7 +113,7 @@ export function registerGameCommands() {
     usage: '.tebakgambar',
     async execute({ sock, jid, reply, prefix }) {
       if (activeGames.has(jid)) {
-        return reply('⚠️ Masih ada permainan yang sedang berlangsung di chat ini! Selesaikan atau ketik `.nyerah`.');
+        return reply('Masih ada permainan yang sedang berlangsung di chat ini. Ketik .nyerah jika menyerah.');
       }
 
       const item = tebakGambarList[Math.floor(Math.random() * tebakGambarList.length)];
@@ -127,7 +122,7 @@ export function registerGameCommands() {
       const timer = setTimeout(async () => {
         if (activeGames.has(jid)) {
           activeGames.delete(jid);
-          await reply(`⏰ *Waktu Habis!*\nJawaban yang benar adalah: *${item.answer}*`);
+          await reply(`[-] Waktu Habis! Jawaban yang benar adalah: *${item.answer}*`);
         }
       }, timeoutSec * 1000);
 
@@ -138,11 +133,11 @@ export function registerGameCommands() {
         timer,
       });
 
-      let caption = `🖼️ *TEBAK GAMBAR*\n\n`;
+      let caption = `[TEBAK GAMBAR]\n\n`;
       caption += `Petunjuk: \`${item.clue}\`\n`;
       caption += `Waktu: *${timeoutSec} detik*\n`;
       caption += `Hadiah: *+50 Poin*\n\n`;
-      caption += `Balas chat ini langsung dengan tebakanmu! (Ketik \`${prefix}nyerah\` jika pasrah)`;
+      caption += `Balas chat ini langsung dengan tebakanmu (atau ketik \`${prefix}nyerah\`).`;
 
       try {
         const imgRes = await fetch(item.image, {
@@ -171,10 +166,11 @@ export function registerGameCommands() {
         });
       } catch (err) {
         logger.error('Gagal mengirim gambar tebakgambar:', err.message);
-        await reply(`${caption}\n\n⚠️ _(Gambar: ${item.image})_`);
+        await reply(`${caption}\n\n[!] Gagal memuat gambar: ${item.image}`);
       }
     },
   });
+
   // Command: Tebak Kata
   registerCommand({
     name: 'tebakkata',
@@ -184,7 +180,7 @@ export function registerGameCommands() {
     usage: '.tebakkata',
     async execute({ jid, reply, prefix }) {
       if (activeGames.has(jid)) {
-        return reply('⚠️ Masih ada permainan yang sedang berlangsung di chat ini! Ketik `.nyerah` jika menyerah.');
+        return reply('Masih ada permainan yang sedang berlangsung. Ketik .nyerah jika menyerah.');
       }
 
       const item = tebakKataList[Math.floor(Math.random() * tebakKataList.length)];
@@ -193,7 +189,7 @@ export function registerGameCommands() {
       const timer = setTimeout(async () => {
         if (activeGames.has(jid)) {
           activeGames.delete(jid);
-          await reply(`⏰ *Waktu Habis!*\nJawaban tebak kata adalah: *${item.answer}*`);
+          await reply(`[-] Waktu Habis! Jawaban tebak kata adalah: *${item.answer}*`);
         }
       }, timeoutSec * 1000);
 
@@ -204,12 +200,12 @@ export function registerGameCommands() {
         timer,
       });
 
-      let msg = `🧩 *TEBAK KATA*\n\n`;
+      let msg = `[TEBAK KATA]\n\n`;
       msg += `Pertanyaan: *${item.question}*\n`;
       msg += `Petunjuk: \`${item.clue}\`\n`;
       msg += `Waktu: *${timeoutSec} detik*\n`;
       msg += `Hadiah: *+40 Poin*\n\n`;
-      msg += `Ketik tebakanmu langsung di chat ini!`;
+      msg += `Ketik tebakanmu langsung di chat ini.`;
       await reply(msg);
     },
   });
@@ -223,7 +219,7 @@ export function registerGameCommands() {
     usage: '.asahotak',
     async execute({ jid, reply, prefix }) {
       if (activeGames.has(jid)) {
-        return reply('⚠️ Masih ada permainan aktif! Selesaikan dulu atau ketik `.nyerah`.');
+        return reply('Masih ada permainan aktif. Selesaikan dulu atau ketik .nyerah.');
       }
 
       const item = asahOtakList[Math.floor(Math.random() * asahOtakList.length)];
@@ -232,7 +228,7 @@ export function registerGameCommands() {
       const timer = setTimeout(async () => {
         if (activeGames.has(jid)) {
           activeGames.delete(jid);
-          await reply(`⏰ *Waktu Habis!*\nJawaban: *${item.answer}*\nPenjelasan: _${item.explanation}_`);
+          await reply(`[-] Waktu Habis! Jawaban: *${item.answer}*\nPenjelasan: ${item.explanation}`);
         }
       }, timeoutSec * 1000);
 
@@ -243,11 +239,11 @@ export function registerGameCommands() {
         timer,
       });
 
-      let msg = `🧠 *ASAH OTAK*\n\n`;
+      let msg = `[ASAH OTAK]\n\n`;
       msg += `Teka-Teki: *${item.question}*\n`;
       msg += `Waktu: *${timeoutSec} detik*\n`;
       msg += `Hadiah: *+45 Poin*\n\n`;
-      msg += `Balas langsung dengan jawaban logika terbaikmu!`;
+      msg += `Balas langsung dengan jawaban logika terbaikmu.`;
       await reply(msg);
     },
   });
@@ -261,7 +257,7 @@ export function registerGameCommands() {
     usage: '.math',
     async execute({ jid, reply }) {
       if (activeGames.has(jid)) {
-        return reply('⚠️ Ada permainan yang belum selesai. Ketik `.nyerah` untuk mengakhiri.');
+        return reply('Ada permainan yang belum selesai. Ketik .nyerah untuk mengakhiri.');
       }
 
       const mathProb = generateMathProblem();
@@ -270,7 +266,7 @@ export function registerGameCommands() {
       const timer = setTimeout(async () => {
         if (activeGames.has(jid)) {
           activeGames.delete(jid);
-          await reply(`⏰ *Waktu Habis!*\nHasil dari ${mathProb.question} adalah: *${mathProb.answer}*`);
+          await reply(`[-] Waktu Habis! Hasil dari ${mathProb.question} adalah: *${mathProb.answer}*`);
         }
       }, timeoutSec * 1000);
 
@@ -281,11 +277,11 @@ export function registerGameCommands() {
         timer,
       });
 
-      let msg = `⚡ *KUIS MATEMATIKA CEPAT*\n\n`;
+      let msg = `[KUIS MATEMATIKA]\n\n`;
       msg += `Berapa hasil dari: *${mathProb.question}* ?\n\n`;
       msg += `Waktu: *${timeoutSec} detik*\n`;
       msg += `Hadiah: *+35 Poin*\n`;
-      msg += `Ketik angka jawabannya sekarang!`;
+      msg += `Ketik angka jawabannya sekarang.`;
       await reply(msg);
     },
   });
@@ -299,7 +295,7 @@ export function registerGameCommands() {
     usage: '.tictactoe [@user / bot]',
     async execute({ msg, jid, sender, pushName, args, reply }) {
       if (activeGames.has(jid)) {
-        return reply('⚠️ Sedang ada game aktif di obrolan ini! Ketik `.nyerah` untuk membatalkan.');
+        return reply('Sedang ada game aktif di obrolan ini. Ketik .nyerah untuk membatalkan.');
       }
 
       const mentionedJid = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
@@ -309,7 +305,7 @@ export function registerGameCommands() {
         playerX: sender,
         playerXName: pushName,
         playerO: isVsBot ? null : mentionedJid,
-        playerOName: isVsBot ? 'Bot (AI)' : 'Lawan',
+        playerOName: isVsBot ? 'Bot' : 'Lawan',
         isVsBot,
       });
 
@@ -317,7 +313,7 @@ export function registerGameCommands() {
       const timer = setTimeout(async () => {
         if (activeGames.has(jid)) {
           activeGames.delete(jid);
-          await reply('⏰ *Tic-Tac-Toe Berakhir:* Waktu bermain habis karena tidak ada aktivitas.');
+          await reply('[-] Tic-Tac-Toe Berakhir: Waktu bermain habis karena tidak ada aktivitas.');
         }
       }, timeoutSec * 1000);
 
@@ -327,12 +323,12 @@ export function registerGameCommands() {
         timer,
       });
 
-      let text = `🎮 *GAME TIC-TAC-TOE DIMULAI!*\n\n`;
-      text += `❌ Pemain 1: *${session.playerXName}*\n`;
-      text += `⭕ Pemain 2: *${session.playerOName}*\n\n`;
+      let text = `[TIC-TAC-TOE DIMULAI]\n\n`;
+      text += `Pemain 1: *${session.playerXName}* (X)\n`;
+      text += `Pemain 2: *${session.playerOName}* (O)\n\n`;
       text += `${session.renderBoard()}\n\n`;
-      text += `Giliran pertama: *${session.playerXName}* (❌)\n`;
-      text += `Ketik angka *1-9* sesuai kotak pilihanmu!`;
+      text += `Giliran pertama: *${session.playerXName}* (X)\n`;
+      text += `Ketik angka 1-9 sesuai kotak pilihanmu.`;
 
       await reply(text);
     },
@@ -348,17 +344,15 @@ export function registerGameCommands() {
     async execute({ reply }) {
       const topUsers = getLeaderboard(10);
       if (topUsers.length === 0) {
-        return reply('🏆 Belum ada pemain yang tercatat di papan peringkat.');
+        return reply('Belum ada pemain yang tercatat di papan peringkat.');
       }
 
-      const medalEmojis = ['🥇', '🥈', '🥉'];
-      let msg = `🏆 *PAPAN PERINGKAT SKOR TOP 10*\n\n`;
+      let msg = `[PAPAN PERINGKAT TOP 10]\n\n`;
       topUsers.forEach((u, i) => {
-        const medal = medalEmojis[i] || `*${i + 1}.*`;
-        msg += `${medal} *${u.name}* : ${u.score} Poin (${u.gamesWon || 0} menang)\n`;
+        msg += `${i + 1}. *${u.name}* : ${u.score} Poin (${u.gamesWon || 0} menang)\n`;
       });
 
-      msg += `\nMainkan \`.tebakgambar\`, \`.tebakkata\`, \`.math\`, atau \`.tictactoe\` untuk menambah poin!`;
+      msg += `\nMainkan .tebakgambar, .tebakkata, .math, atau .tictactoe untuk menambah poin.`;
       await reply(msg);
     },
   });
@@ -372,10 +366,10 @@ export function registerGameCommands() {
     usage: '.score',
     async execute({ sender, pushName, reply }) {
       const user = getUser(sender, pushName);
-      let msg = `📊 *STATISTIK PERMAINAN*\n\n`;
-      msg += `👤 Nama: *${user.name}*\n`;
-      msg += `💰 Poin: *${user.score || 0}*\n`;
-      msg += `🏆 Game Dimenangkan: *${user.gamesWon || 0}*\n`;
+      let msg = `[STATISTIK PERMAINAN]\n\n`;
+      msg += `Nama: *${user.name}*\n`;
+      msg += `Poin: *${user.score || 0}*\n`;
+      msg += `Game Dimenangkan: *${user.gamesWon || 0}*\n`;
       await reply(msg);
     },
   });

@@ -76,7 +76,10 @@ export async function messageHandler(sock, chatUpdate) {
 
     const reply = createReplyHelper(sock, remoteJid, msg);
     const config = getConfig();
-    const prefix = config.prefix || '.';
+    const configuredPrefix = config.prefix || '.';
+    const validPrefixes = Array.from(new Set([configuredPrefix, '/', '.']));
+    const matchedPrefix = validPrefixes.find((p) => text.startsWith(p));
+    const prefix = matchedPrefix || configuredPrefix;
 
     // 0. Anti-Spam Group Kick & Auto Re-Add
     if (isGroup && !msg.key.fromMe) {
@@ -152,15 +155,15 @@ export async function messageHandler(sock, chatUpdate) {
       }
     }
 
-    // 3. Jika pesan dari nomor sendiri tapi bukan game/angka, HANYA proses jika diawali prefix
-    if (msg.key.fromMe && (config.selfMode === false || !text.startsWith(prefix))) {
+    // 3. Jika pesan dari nomor sendiri tapi bukan game/angka, HANYA proses jika diawali prefix valid
+    if (msg.key.fromMe && (config.selfMode === false || !matchedPrefix)) {
       return;
     }
 
-    // 3. Cek apakah pesan diawali dengan prefix (default '.')
-    if (!text.startsWith(prefix)) return;
+    // Cek apakah pesan diawali dengan prefix valid (. atau /)
+    if (!matchedPrefix) return;
 
-    // Jika user hanya mengetik prefix saja (misal "." atau ".?")
+    // Jika user hanya mengetik prefix saja (misal "." atau "/" atau ".?" atau "/?")
     if (text === prefix || text === `${prefix}?` || text === `${prefix}help`) {
       await reply(formatPrefixOnlyHelper(prefix));
       return;
@@ -191,7 +194,7 @@ export async function messageHandler(sock, chatUpdate) {
     const rateCheck = checkRateLimit(sender);
     if (rateCheck.limited) {
       logger.warn(`Rate limit triggered oleh ${sender}`);
-      await reply(`⏳ Mohon tunggu ${rateCheck.remaining} detik sebelum menggunakan perintah lagi.`);
+      await reply(`[!] Mohon tunggu ${rateCheck.remaining} detik sebelum menggunakan perintah lagi.`);
       return;
     }
 
@@ -199,7 +202,7 @@ export async function messageHandler(sock, chatUpdate) {
     if (command.category !== 'general') {
       const isCategoryActive = config.features && config.features[command.category];
       if (isCategoryActive === false) {
-        await reply(`⚠️ Fitur *${command.category.toUpperCase()}* sedang dinonaktifkan oleh administrator.`);
+        await reply(`[!] Fitur *${command.category.toUpperCase()}* sedang dinonaktifkan oleh administrator.`);
         return;
       }
     }
@@ -235,9 +238,9 @@ registerCommand({
   usage: '.ping',
   async execute({ reply }) {
     const start = Date.now();
-    await reply('🏓 Pong!');
+    await reply('Pong!');
     const latency = Date.now() - start;
-    await reply(`⚡ Kecepatan respon: *${latency}ms*`);
+    await reply(`Kecepatan respon: *${latency}ms*`);
   },
 });
 
@@ -249,36 +252,34 @@ registerCommand({
   usage: '.menu',
   async execute({ reply, config, prefix, pushName }) {
     const categories = getCommandsByCategory();
-    const categoryIcons = {
-      media: '🎨 MEDIA, STIKER & PHOTOLIVE',
-      downloader: '📥 SOCIAL MEDIA DOWNLOADER',
-      group: '👥 GRUP & MANAJEMEN',
-      game: '🎮 GAME & KUIS',
-      osint: '🔍 OSINT & NETWORK',
-      ai: '🤖 ARTIFICIAL INTELLIGENCE',
-      programming: '💻 PEMROGRAMAN & DEV TOOLS',
-      general: '⚙️ UTILITY & UMUM',
+    const categoryHeaders = {
+      media: 'MEDIA, STIKER & PHOTOLIVE',
+      downloader: 'SOCIAL MEDIA DOWNLOADER',
+      group: 'GRUP & MANAJEMEN',
+      game: 'GAME & KUIS',
+      osint: 'OSINT & NETWORK',
+      ai: 'ARTIFICIAL INTELLIGENCE',
+      programming: 'PEMROGRAMAN & DEV TOOLS',
+      general: 'UTILITY & UMUM',
     };
 
-    let menuText = `Halo *${pushName}*! 👋\n`;
+    let menuText = `Halo *${pushName}*!\n`;
     menuText += `Selamat datang di *${config.botName || 'NexBot'}*\n`;
-    menuText += `Prefix: \`${prefix}\`\n\n`;
+    menuText += `Prefix aktif: \`${prefix}\` atau \`/\`\n\n`;
 
     for (const [cat, list] of Object.entries(categories)) {
-      const header = categoryIcons[cat] || `📁 ${cat.toUpperCase()}`;
+      const header = categoryHeaders[cat] || cat.toUpperCase();
       const isEnabled = config.features && config.features[cat] !== false;
-      const statusTag = isEnabled ? '' : ' _(Nonaktif)_';
+      const statusTag = isEnabled ? '' : ' (Nonaktif)';
 
-      menuText += `┌───⊷ *${header}*${statusTag}\n`;
+      menuText += `[ ${header}${statusTag} ]\n`;
       for (const item of list) {
-        menuText += `│ • \`${prefix}${item.name}\` : ${item.description}\n`;
+        menuText += `- ${prefix}${item.name} : ${item.description}\n`;
       }
-      menuText += `└───⊷\n\n`;
+      menuText += `\n`;
     }
 
-    menuText += `💡 *Tips:* Ketik command sesuai panduan untuk menggunakan fitur.\n`;
-    menuText += `🌐 Web Dashboard aktif untuk memantau status bot & konfigurasi.`;
-
+    menuText += `Tips: Ketik ${prefix}<perintah> atau /<perintah> untuk menjalankan fitur.`;
     await reply(menuText.trim());
   },
 });

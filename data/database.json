@@ -3,9 +3,9 @@
     "test_user_123@s.whatsapp.net": {
       "jid": "test_user_123@s.whatsapp.net",
       "name": "TestPlayer",
-      "score": 400,
-      "gamesWon": 4,
-      "lastActive": "2026-09-23T06:48:44.130Z"
+      "score": 700,
+      "gamesWon": 7,
+      "lastActive": "2026-09-23T08:31:08.439Z"
     },
     "150349658751133@lid": {
       "jid": "150349658751133@lid",
@@ -27,16 +27,26 @@
       "score": 75,
       "gamesWon": 1,
       "lastActive": "2026-09-23T08:07:56.460Z"
+    },
+    "628999999999@s.whatsapp.net": {
+      "jid": "628999999999@s.whatsapp.net",
+      "name": "User",
+      "score": 150,
+      "gamesWon": 3,
+      "lastActive": "2026-09-23T08:31:09.528Z"
     }
   },
   "stats": {
-    "totalCommands": 148,
+    "totalCommands": 170,
     "byCategory": {
       "game": 48,
-      "osint": 0,
+      "osint": 1,
       "ai": 1,
-      "programming": 4,
-      "general": 95
+      "programming": 6,
+      "general": 105,
+      "group": 3,
+      "media": 5,
+      "downloader": 1
     }
   }
 }

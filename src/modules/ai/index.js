@@ -7,9 +7,9 @@ export async function askAI(prompt, systemInstruction = '', options = {}) {
   const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
   const geminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
 
-  const systemMessage = systemInstruction || `Kamu adalah NexBot, asisten virtual AI WhatsApp yang ramah, ringkas, cerdas, dan berbahasa Indonesia yang baik. Jawab langsung ke inti tanpa basa-basi berlebihan.`;
+  const systemMessage = systemInstruction || `Kamu adalah NexBot, asisten virtual AI WhatsApp yang ramah, ringkas, cerdas, dan berbahasa Indonesia yang baik. Jawab langsung ke inti tanpa basa-basi berlebihan. Jangan gunakan emoji dalam balasan.`;
 
-  // 1. Opsi Groq API (Kecepatan tinggi Llama 3)
+  // 1. Opsi Groq API
   if (groqKey && (config.aiProvider === 'hybrid' || config.aiProvider === 'groq')) {
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -68,7 +68,7 @@ export async function askAI(prompt, systemInstruction = '', options = {}) {
     }
   }
 
-  // 3. Fallback Zero-Key (Gratis tanpa API key)
+  // 3. Fallback Zero-Key via POST
   try {
     const payload = {
       messages: [
@@ -115,6 +115,7 @@ export async function askAI(prompt, systemInstruction = '', options = {}) {
   } catch (err) {
     logger.warn('Error saat menghubungi Pollinations GET:', err.message);
   }
+
   throw new Error('Semua provider AI sedang tidak dapat dijangkau. Coba beberapa saat lagi.');
 }
 
@@ -128,17 +129,17 @@ export function registerAiCommands() {
     usage: '.ai <pertanyaan>',
     async execute({ fullText, reply }) {
       if (!fullText) {
-        return reply('⚠️ Silakan masukkan pertanyaan atau topik yang ingin kamu tanyakan!\nContoh: `.ai jelaskan perbedaan HTTP dan HTTPS`');
+        return reply('[!] Silakan masukkan pertanyaan atau topik yang ingin kamu tanyakan.\nContoh: .ai jelaskan perbedaan HTTP dan HTTPS');
       }
 
-      await reply('💭 _Sedang berpikir..._');
+      await reply('[-] Sedang memproses...');
 
       try {
         const answer = await askAI(fullText);
-        await reply(`🤖 *NexBot AI:*\n\n${answer}`);
+        await reply(`[NexBot AI]\n\n${answer}`);
       } catch (err) {
         logger.error('Error command .ai:', err.message);
-        await reply(`❌ Maaf, gagal memproses permintaan AI: ${err.message}`);
+        await reply(`[!] Gagal memproses permintaan AI: ${err.message}`);
       }
     },
   });
@@ -152,17 +153,17 @@ export function registerAiCommands() {
     usage: '.explain <kode>',
     async execute({ fullText, reply }) {
       if (!fullText) {
-        return reply('⚠️ Tempelkan kode yang ingin dijelaskan!\nContoh: `.explain const sum = (a, b) => a + b;`');
+        return reply('[!] Tempelkan kode yang ingin dijelaskan.\nContoh: .explain const sum = (a, b) => a + b;');
       }
 
-      await reply('🔍 _Sedang membedah kode..._');
+      await reply('[-] Menganalisis kode...');
 
       try {
-        const sys = `Kamu adalah code reviewer dan senior software engineer. Jelaskan kode berikut dengan runtut, singkat, sebutkan kompleksitas atau potensi bug jika ada.`;
+        const sys = `Kamu adalah code reviewer dan senior software engineer. Jelaskan kode berikut dengan runtut, singkat, sebutkan kompleksitas atau potensi bug jika ada. Jangan gunakan emoji.`;
         const explanation = await askAI(fullText, sys);
-        await reply(`💻 *ANALISIS KODE:*\n\n${explanation}`);
+        await reply(`[ANALISIS KODE]\n\n${explanation}`);
       } catch (err) {
-        await reply(`❌ Gagal menjelaskan kode: ${err.message}`);
+        await reply(`[!] Gagal menjelaskan kode: ${err.message}`);
       }
     },
   });
@@ -176,17 +177,17 @@ export function registerAiCommands() {
     usage: '.summarize <teks>',
     async execute({ fullText, reply }) {
       if (!fullText || fullText.length < 30) {
-        return reply('⚠️ Masukkan teks minimal 30 karakter yang ingin diringkas!');
+        return reply('[!] Masukkan teks minimal 30 karakter yang ingin diringkas.');
       }
 
-      await reply('📝 _Sedang merangkum inti sari teks..._');
+      await reply('[-] Merangkum teks...');
 
       try {
-        const sys = `Kamu adalah asisten perangkum profesional. Ringkas teks yang diberikan ke dalam bentuk poin-poin penting yang padat dan jelas.`;
+        const sys = `Kamu adalah asisten perangkum profesional. Ringkas teks yang diberikan ke dalam bentuk poin-poin penting yang padat dan jelas. Jangan gunakan emoji.`;
         const summary = await askAI(fullText, sys);
-        await reply(`📋 *HASIL RINGKASAN:*\n\n${summary}`);
+        await reply(`[HASIL RINGKASAN]\n\n${summary}`);
       } catch (err) {
-        await reply(`❌ Gagal merangkum teks: ${err.message}`);
+        await reply(`[!] Gagal merangkum teks: ${err.message}`);
       }
     },
   });
@@ -203,17 +204,17 @@ export function registerAiCommands() {
       const textToTranslate = args.slice(1).join(' ');
 
       if (!targetLang || !textToTranslate) {
-        return reply('⚠️ Format salah!\nContoh: `.translate english selamat pagi apa kabar`\natau `.translate jepang terima kasih banyak`');
+        return reply('[!] Format salah.\nContoh: .translate english selamat pagi apa kabar\natau .translate jepang terima kasih banyak');
       }
 
       try {
-        const sys = `Kamu adalah penerjemah bahasa akurat. Terjemahkan teks yang diberikan ke dalam bahasa target: "${targetLang}". Keluarkan HANYA hasil terjemahannya tanpa penjelasan tambahan.`;
+        const sys = `Kamu adalah penerjemah bahasa akurat. Terjemahkan teks yang diberikan ke dalam bahasa target: "${targetLang}". Keluarkan HANYA hasil terjemahannya tanpa penjelasan tambahan dan tanpa emoji.`;
         const result = await askAI(textToTranslate, sys);
-        let out = `🌐 *TERJEMAHAN (${targetLang.toUpperCase()}):*\n\n`;
+        let out = `[TERJEMAHAN (${targetLang.toUpperCase()})]\n\n`;
         out += `"${result}"`;
         await reply(out);
       } catch (err) {
-        await reply(`❌ Gagal menerjemahkan: ${err.message}`);
+        await reply(`[!] Gagal menerjemahkan: ${err.message}`);
       }
     },
   });

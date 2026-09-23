@@ -19,7 +19,7 @@ async function safeUnlink(...paths) {
         fs.unlinkSync(p);
       }
     } catch {
-      // ignore cleanup error
+      // ignore
     }
   }
 }
@@ -43,14 +43,22 @@ export async function imageToWebpSticker(imageBuffer) {
   }
 }
 
-// 2. Video / GIF / Live Photo ke Animated WebP Sticker (Max 6 detik, 12-15 FPS, < 1MB)
-export async function videoToWebpSticker(videoBuffer) {
+// 2. Video / GIF / Live Photo ke Animated WebP Sticker Boomerang Loop (Mulus & Seamless)
+export async function videoToWebpSticker(videoBuffer, isLivePhoto = false) {
   const inPath = getTempFilePath('mp4');
   const outPath = getTempFilePath('webp');
 
   try {
     fs.writeFileSync(inPath, videoBuffer);
-    const cmd = `ffmpeg -y -i "${inPath}" -vcodec libwebp -filter:v "scale='if(gt(a,1),512,-1)':'if(gt(a,1),-1,512)',pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0.0,fps=12" -loop 0 -ss 0 -t 6 -preset default -an -s 512:512 "${outPath}"`;
+    let cmd;
+
+    if (isLivePhoto) {
+      // Boomerang Ping-Pong effect (Maju lalu Mundur) agar looping mulus tanpa patah
+      cmd = `ffmpeg -y -i "${inPath}" -filter_complex "[0:v]reverse[r];[0:v][r]concat=n=2:v=1[v];[v]scale='if(gt(a,1),512,-1)':'if(gt(a,1),-1,512)',pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0.0,fps=15" -vcodec libwebp -loop 0 -ss 0 -t 6 -preset default -an -s 512:512 "${outPath}"`;
+    } else {
+      cmd = `ffmpeg -y -i "${inPath}" -vcodec libwebp -filter:v "scale='if(gt(a,1),512,-1)':'if(gt(a,1),-1,512)',pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0.0,fps=15" -loop 0 -ss 0 -t 6 -preset default -an -s 512:512 "${outPath}"`;
+    }
+
     await execAsync(cmd);
     const webpBuffer = fs.readFileSync(outPath);
     return webpBuffer;
@@ -81,12 +89,11 @@ export async function stickerToPng(webpBuffer) {
   }
 }
 
-// 4. Quote Chat Estetik Lokal (SVG to WebP)
+// 4. Quote Chat Estetik (SVG to WebP)
 export async function generateQuoteSticker(name = 'User', text = '', senderNumber = '') {
   const inPath = getTempFilePath('svg');
   const outPath = getTempFilePath('webp');
 
-  // Bersihkan teks dari karakter berbahaya XML
   const cleanText = String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -101,7 +108,6 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   const initial = cleanName.charAt(0).toUpperCase() || 'U';
   const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
-  // Bungkus teks panjang ke baris terpisah
   const words = cleanText.split(' ');
   const lines = [];
   let currentLine = '';
@@ -116,7 +122,7 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   }
   if (currentLine.trim()) lines.push(currentLine.trim());
 
-  const displayedLines = lines.slice(0, 5); // Maks 5 baris
+  const displayedLines = lines.slice(0, 5);
   const textTspans = displayedLines
     .map((line, i) => `<tspan x="65" y="${220 + i * 28}">${line}</tspan>`)
     .join('');
@@ -134,24 +140,15 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
     </linearGradient>
   </defs>
 
-  <!-- Bubble Card -->
   <rect x="25" y="75" width="462" height="360" rx="28" fill="url(#cardBg)" stroke="#313244" stroke-width="2"/>
-
-  <!-- Avatar Circle -->
   <circle cx="95" cy="145" r="32" fill="url(#avatarGrad)"/>
   <text x="95" y="156" font-family="system-ui, sans-serif" font-size="26" font-weight="bold" fill="#ffffff" text-anchor="middle">${initial}</text>
-
-  <!-- Name & Subtitle -->
   <text x="145" y="142" font-family="system-ui, sans-serif" font-size="20" font-weight="bold" fill="#cdd6f4">${cleanName}</text>
-  <text x="145" y="165" font-family="system-ui, sans-serif" font-size="13" fill="#a6adc8">~ ${senderNumber || 'WhatsApp'}</text>
-
-  <!-- Quote Text -->
+  <text x="145" y="165" font-family="system-ui, sans-serif" font-size="13" fill="#a6adc8">${senderNumber || 'User'}</text>
   <text font-family="system-ui, sans-serif" font-size="20" font-weight="500" fill="#f5e0dc">
     ${textTspans}
   </text>
-
-  <!-- Footer Time -->
-  <text x="445" y="405" font-family="system-ui, sans-serif" font-size="13" fill="#6c7086" text-anchor="end">${timeStr} • NexBot</text>
+  <text x="445" y="405" font-family="system-ui, sans-serif" font-size="13" fill="#6c7086" text-anchor="end">${timeStr}</text>
 </svg>
 `;
 
@@ -169,15 +166,15 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   }
 }
 
-// 5. PhotoLive Motion: Mengubah foto statis menjadi video Live Photo bergerak (Cinematic Zoompan)
+// 5. PhotoLive Motion: Zoompan anti-jitter berkecepatan tinggi & mulus tanpa getar
 export async function createPhotoLiveMotion(imageBuffer) {
   const inPath = getTempFilePath('jpg');
   const outPath = getTempFilePath('mp4');
 
   try {
     fs.writeFileSync(inPath, imageBuffer);
-    // Efek zoom-in dinamis lembut 3 detik (30 fps)
-    const cmd = `ffmpeg -y -loop 1 -i "${inPath}" -vf "zoompan=z='min(zoom+0.0015,1.15)':d=90:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=512x512,fps=30" -c:v libx264 -t 3 -pix_fmt yuv420p "${outPath}"`;
+    // Skala resolusi tinggi 4000px sebelum zoompan agar pembulatan koordinat integer tidak menyebabkan getaran/jitter
+    const cmd = `ffmpeg -y -loop 1 -i "${inPath}" -vf "scale=4000:-1,zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=120:s=512x512:fps=30" -c:v libx264 -t 4 -pix_fmt yuv420p "${outPath}"`;
     await execAsync(cmd);
     const videoBuffer = fs.readFileSync(outPath);
     return videoBuffer;

@@ -27,10 +27,10 @@ export function registerMediaCommands() {
       const isDirectVideo = msg.message?.videoMessage;
 
       if (!isDirectImage && !isDirectVideo && !isQuotedImage && !isQuotedVideo) {
-        return reply(`⚠️ Format salah!\nKirim foto atau video pendek dengan caption \`${prefix}s\` atau balas (*reply*) foto yang sudah ada.`);
+        return reply(`[!] Format salah.\nKirim foto atau video pendek dengan caption \`${prefix}s\` atau balas (*reply*) media yang sudah ada.`);
       }
 
-      await reply('⏳ _Sedang membuat stiker..._');
+      await reply('[-] Sedang memproses stiker...');
 
       try {
         let mediaBuffer;
@@ -49,12 +49,12 @@ export function registerMediaCommands() {
         }
 
         if (!mediaBuffer || mediaBuffer.length === 0) {
-          return reply('❌ Gagal mengunduh media dari pesan.');
+          return reply('[!] Gagal mengunduh media dari pesan.');
         }
 
         let webpSticker;
         if (isVideo) {
-          webpSticker = await videoToWebpSticker(mediaBuffer);
+          webpSticker = await videoToWebpSticker(mediaBuffer, false);
         } else {
           webpSticker = await imageToWebpSticker(mediaBuffer);
         }
@@ -64,7 +64,7 @@ export function registerMediaCommands() {
         });
       } catch (err) {
         logger.error('Error saat membuat stiker:', err.message);
-        await reply(`❌ Gagal membuat stiker: ${err.message}`);
+        await reply(`[!] Gagal membuat stiker: ${err.message}`);
       }
     },
   });
@@ -81,10 +81,10 @@ export function registerMediaCommands() {
       const isSticker = quoted?.stickerMessage;
 
       if (!isSticker) {
-        return reply('⚠️ Balas (*reply*) sebuah stiker dengan perintah `.toimg` untuk mengubahnya jadi foto!');
+        return reply('[!] Balas (*reply*) sebuah stiker dengan perintah .toimg untuk mengubahnya jadi foto.');
       }
 
-      await reply('🔄 _Sedang mengekstrak stiker menjadi gambar..._');
+      await reply('[-] Sedang mengekstrak stiker menjadi gambar...');
 
       try {
         const fakeMsg = {
@@ -94,18 +94,18 @@ export function registerMediaCommands() {
         const stickerBuffer = await downloadMediaMessage(fakeMsg, 'buffer', {});
 
         if (!stickerBuffer) {
-          return reply('❌ Gagal mengunduh stiker.');
+          return reply('[!] Gagal mengunduh stiker.');
         }
 
         const pngBuffer = await stickerToPng(stickerBuffer);
 
         await sock.sendMessage(jid, {
           image: pngBuffer,
-          caption: '✨ Ini gambar hasil konversi stiker kamu!',
+          caption: 'Hasil konversi stiker ke gambar:',
         });
       } catch (err) {
         logger.error('Error saat toimg:', err.message);
-        await reply(`❌ Gagal mengubah stiker: ${err.message}`);
+        await reply(`[!] Gagal mengubah stiker: ${err.message}`);
       }
     },
   });
@@ -122,7 +122,6 @@ export function registerMediaCommands() {
       let authorName = pushName || 'User';
       const senderNum = sender.replace(/[^0-9]/g, '');
 
-      // Jika membalas pesan orang lain
       const quoted = msg.message?.extendedTextMessage?.contextInfo;
       if (!textToQuote && quoted?.quotedMessage) {
         const qMsg = quoted.quotedMessage;
@@ -131,10 +130,10 @@ export function registerMediaCommands() {
       }
 
       if (!textToQuote) {
-        return reply(`⚠️ Masukkan teks untuk dijadikan stiker quote!\nContoh: \`${prefix}qc Kata-kata motivasi hari ini\`\natau balas pesan orang lain dengan \`${prefix}qc\``);
+        return reply(`[!] Masukkan teks untuk quote.\nContoh: \`${prefix}qc Kata-kata hari ini\`\natau balas pesan orang lain dengan \`${prefix}qc\`.`);
       }
 
-      await reply('🎨 _Sedang mendesain stiker quote..._');
+      await reply('[-] Sedang membuat stiker quote...');
 
       try {
         const webpBuffer = await generateQuoteSticker(authorName, textToQuote, senderNum);
@@ -144,7 +143,7 @@ export function registerMediaCommands() {
         });
       } catch (err) {
         logger.error('Error saat membuat quote sticker:', err.message);
-        await reply(`❌ Gagal membuat quote stiker: ${err.message}`);
+        await reply(`[!] Gagal membuat quote stiker: ${err.message}`);
       }
     },
   });
@@ -154,7 +153,7 @@ export function registerMediaCommands() {
     name: 'photolive',
     aliases: ['livephoto', 'livepic'],
     category: 'media',
-    description: 'iPhone Live Photo converter (video pendek ke stiker bergerak loop, atau foto jadi video gerak)',
+    description: 'iPhone Live Photo converter (video pendek ke stiker bergerak loop mulus, atau foto jadi video gerak)',
     usage: '.photolive [balas Live Photo iPhone / video / foto]',
     async execute({ sock, msg, jid, reply, prefix }) {
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -165,10 +164,10 @@ export function registerMediaCommands() {
       const isDirectImage = msg.message?.imageMessage;
 
       if (!isDirectVideo && !isDirectImage && !isQuotedVideo && !isQuotedImage) {
-        return reply(`📷 *FITUR IPHONE PHOTOLIVE*\n\nKirim atau balas (*reply*) video pendek Live Photo iPhone atau foto dengan \`${prefix}photolive\`.\n\n• Video / Live Photo ➔ Diubah jadi stiker animasi bergerak looping halus.\n• Foto statis ➔ Diubah jadi video sinematik Live Photo (efek zoom-pan bergerak)!`);
+        return reply(`[PHOTOLIVE IPHONE]\n\nKirim atau balas (*reply*) video pendek Live Photo iPhone atau foto dengan \`${prefix}photolive\`.\n\n- Video / Live Photo : Diubah jadi stiker animasi bergerak looping mulus (boomerang).\n- Foto statis : Diubah jadi video sinematik gerak mulus anti-getar.`);
       }
 
-      await reply('✨ _Sedang memproses efek PhotoLive..._');
+      await reply('[-] Memproses efek PhotoLive...');
 
       try {
         let mediaBuffer;
@@ -187,23 +186,23 @@ export function registerMediaCommands() {
         }
 
         if (isVideo) {
-          // Kasus 1: Live Photo video ➔ Animated WebP sticker loop
-          const animSticker = await videoToWebpSticker(mediaBuffer);
+          // Kasus 1: Live Photo video -> Animated WebP sticker loop boomerang
+          const animSticker = await videoToWebpSticker(mediaBuffer, true);
           await sock.sendMessage(jid, {
             sticker: animSticker,
           });
         } else {
-          // Kasus 2: Foto ➔ Video sinematik gerak loop MP4
+          // Kasus 2: Foto -> Video gerak sinematik mulus
           const motionVideo = await createPhotoLiveMotion(mediaBuffer);
           await sock.sendMessage(jid, {
             video: motionVideo,
-            caption: '📸 *iPhone PhotoLive Motion Effect*',
+            caption: '[PHOTOLIVE] Motion Cinematic Effect',
             gifPlayback: true,
           });
         }
       } catch (err) {
         logger.error('Error saat proses PhotoLive:', err.message);
-        await reply(`❌ Gagal memproses PhotoLive: ${err.message}`);
+        await reply(`[!] Gagal memproses PhotoLive: ${err.message}`);
       }
     },
   });

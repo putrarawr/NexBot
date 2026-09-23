@@ -37,7 +37,7 @@ export async function handleAfkInteractions({ sender, pushName, text, contextInf
     const duration = formatTimeAgo(afk.time);
     const senderNum = sender.replace(/[^0-9]/g, '');
 
-    await reply(`👋 Selamat datang kembali @${senderNum}!\nStatus AFK dinonaktifkan setelah *${duration}*.\nAlasan sebelumnya: _"${afk.reason}"_`, {
+    await reply(`[+] Selamat datang kembali @${senderNum}!\nStatus AFK dinonaktifkan setelah ${duration}.\nAlasan sebelumnya: "${afk.reason}"`, {
       mentions: [sender],
     });
     return;
@@ -51,10 +51,10 @@ export async function handleAfkInteractions({ sender, pushName, text, contextInf
       const targetNum = targetJid.replace(/[^0-9]/g, '');
       const duration = formatTimeAgo(afk.time);
 
-      await reply(`⚠️ Jangan tag @${targetNum}, dia sedang *AFK* sejak ${duration} lalu!\nAlasan: _"${afk.reason}"_`, {
+      await reply(`[!] @${targetNum} sedang AFK sejak ${duration} lalu.\nAlasan: "${afk.reason}"`, {
         mentions: [targetJid],
       });
-      break; // Beritahu sekali per pesan agar tidak spam
+      break;
     }
   }
 }
@@ -69,7 +69,7 @@ export function registerGroupCommands() {
     usage: '.hidetag <pesan>',
     async execute({ sock, msg, jid, sender, fullText, isGroup, reply, config }) {
       if (!jid.endsWith('@g.us')) {
-        return reply('⚠️ Perintah ini hanya dapat digunakan di dalam Grup WhatsApp!');
+        return reply('[!] Perintah ini hanya dapat digunakan di dalam Grup WhatsApp.');
       }
 
       try {
@@ -82,7 +82,7 @@ export function registerGroupCommands() {
         const isOwner = config.ownerNumber && senderClean.includes(config.ownerNumber.replace(/[^0-9]/g, ''));
 
         if (!isSenderAdmin && !isOwner) {
-          return reply('⚠️ Perintah `.hidetag` hanya boleh digunakan oleh Admin Grup!');
+          return reply('[!] Perintah .hidetag hanya boleh digunakan oleh Admin Grup.');
         }
 
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -93,7 +93,7 @@ export function registerGroupCommands() {
         }
 
         if (!messageText) {
-          messageText = '📢 *Panggilan Pengumuman Grup!*';
+          messageText = '[PENGUMUMAN GRUP]';
         }
 
         const participants = groupMeta.participants.map((p) => p.id);
@@ -104,7 +104,7 @@ export function registerGroupCommands() {
         });
       } catch (err) {
         logger.error('Error saat hidetag:', err.message);
-        await reply(`❌ Gagal melakukan hidetag: ${err.message}`);
+        await reply(`[!] Gagal melakukan hidetag: ${err.message}`);
       }
     },
   });
@@ -121,10 +121,10 @@ export function registerGroupCommands() {
       setAfk(sender, reason, pushName);
       const senderNum = sender.replace(/[^0-9]/g, '');
 
-      let msg = `💤 *STATUS AFK DIAKTIFKAN*\n\n`;
-      msg += `👤 Pengguna: @${senderNum}\n`;
-      msg += `📝 Alasan: _"${reason}"_\n\n`;
-      msg += `Bot otomatis memberitahu member lain jika kamu di-tag di grup. Ketik pesan apa saja untuk kembali aktif!`;
+      let msg = `[STATUS AFK AKTIF]\n\n`;
+      msg += `Pengguna: @${senderNum}\n`;
+      msg += `Alasan: "${reason}"\n\n`;
+      msg += `Bot otomatis memberitahu member lain jika kamu di-tag di grup. Ketik pesan apa saja untuk kembali aktif.`;
 
       await reply(msg, { mentions: [sender] });
     },
