@@ -1,0 +1,21 @@
+{
+  "users": {
+    "test_user_123@s.whatsapp.net": {
+      "jid": "test_user_123@s.whatsapp.net",
+      "name": "TestPlayer",
+      "score": 200,
+      "gamesWon": 2,
+      "lastActive": "2026-09-23T06:24:33.399Z"
+    }
+  },
+  "stats": {
+    "totalCommands": 0,
+    "byCategory": {
+      "game": 0,
+      "osint": 0,
+      "ai": 0,
+      "programming": 0,
+      "general": 0
+    }
+  }
+}

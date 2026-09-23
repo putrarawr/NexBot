@@ -1,0 +1,15 @@
+{
+  "botName": "NexBot",
+  "prefix": ".",
+  "adminPassword": "admin123",
+  "ownerNumber": "",
+  "features": {
+    "game": true,
+    "osint": true,
+    "ai": true,
+    "programming": true
+  },
+  "aiProvider": "hybrid",
+  "groqApiKey": "",
+  "geminiApiKey": ""
+}

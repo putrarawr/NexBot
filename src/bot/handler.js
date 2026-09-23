@@ -1,0 +1,188 @@
+import { logger } from '../utils/logger.js';
+import { getConfig } from '../config.js';
+import { checkRateLimit, createReplyHelper } from './antiBan.js';
+import { incrementCommandStat } from '../utils/database.js';
+import { handleGameInput } from '../modules/game/index.js';
+
+export const commands = new Map();
+export const aliases = new Map();
+
+export function registerCommand(commandDef) {
+  const { name, aliases: aliasList = [], category = 'general', description = '', usage = '', execute } = commandDef;
+  const cmdObj = { name, aliases: aliasList, category, description, usage, execute };
+  commands.set(name.toLowerCase(), cmdObj);
+
+  for (const alias of aliasList) {
+    aliases.set(alias.toLowerCase(), name.toLowerCase());
+  }
+}
+
+export function getCommandsByCategory() {
+  const categories = {};
+  for (const cmd of commands.values()) {
+    if (!categories[cmd.category]) {
+      categories[cmd.category] = [];
+    }
+    // Hindari duplikasi jika command memiliki beberapa alias
+    if (!categories[cmd.category].some((c) => c.name === cmd.name)) {
+      categories[cmd.category].push(cmd);
+    }
+  }
+  return categories;
+}
+
+export async function messageHandler(sock, chatUpdate) {
+  try {
+    const { messages, type } = chatUpdate;
+    if (!messages || messages.length === 0) return;
+
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
+
+    // Filter pesan status/broadcast WA
+    const remoteJid = msg.key.remoteJid;
+    if (remoteJid === 'status@broadcast') return;
+
+    const isGroup = remoteJid.endsWith('@g.us');
+    const sender = isGroup ? msg.key.participant || remoteJid : remoteJid;
+    const pushName = msg.pushName || 'User';
+
+    // Ekstraksi isi teks pesan
+    const messageContent = msg.message;
+    const rawText =
+      messageContent.conversation ||
+      messageContent.extendedTextMessage?.text ||
+      messageContent.imageMessage?.caption ||
+      messageContent.videoMessage?.caption ||
+      '';
+
+    const text = rawText.trim();
+    if (!text) return;
+
+    const reply = createReplyHelper(sock, remoteJid, msg);
+    const config = getConfig();
+
+    // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini
+    const gameIntercepted = await handleGameInput({
+      sock,
+      msg,
+      jid: remoteJid,
+      sender,
+      pushName,
+      text,
+      reply,
+    });
+
+    if (gameIntercepted) {
+      return; // Pesan adalah jawaban game, tidak perlu diproses sebagai command
+    }
+
+    // 2. Cek apakah pesan diawali dengan prefix (default '.')
+    const prefix = config.prefix || '.';
+    if (!text.startsWith(prefix)) return;
+
+    const withoutPrefix = text.slice(prefix.length).trim();
+    const [rawCmd, ...args] = withoutPrefix.split(/\s+/);
+    if (!rawCmd) return;
+
+    const cmdName = rawCmd.toLowerCase();
+    const resolvedName = aliases.get(cmdName) || cmdName;
+    const command = commands.get(resolvedName);
+
+    if (!command) {
+      // Command tidak dikenali
+      return;
+    }
+
+    // 3. Rate limiting per user
+    const rateCheck = checkRateLimit(sender);
+    if (rateCheck.limited) {
+      logger.warn(`Rate limit triggered oleh ${sender}`);
+      await reply(`⏳ Mohon tunggu ${rateCheck.remaining} detik sebelum menggunakan perintah lagi.`);
+      return;
+    }
+
+    // 4. Periksa toggle fitur dari config
+    if (command.category !== 'general') {
+      const isCategoryActive = config.features && config.features[command.category];
+      if (isCategoryActive === false) {
+        await reply(`⚠️ Fitur *${command.category.toUpperCase()}* sedang dinonaktifkan oleh administrator.`);
+        return;
+      }
+    }
+
+    // 5. Eksekusi Command
+    logger.bot(`Command dipanggil: ${prefix}${cmdName} oleh ${pushName} (${sender.split('@')[0]})`);
+    incrementCommandStat(command.category);
+
+    await command.execute({
+      sock,
+      msg,
+      jid: remoteJid,
+      sender,
+      pushName,
+      command: cmdName,
+      args,
+      fullText: args.join(' '),
+      reply,
+      config,
+      prefix,
+    });
+  } catch (err) {
+    logger.error('Error saat menangani pesan masuk:', err);
+  }
+}
+
+// Inisialisasi command bawaan (Menu & Ping)
+registerCommand({
+  name: 'ping',
+  aliases: ['p', 'speed'],
+  category: 'general',
+  description: 'Cek kecepatan respon bot',
+  usage: '.ping',
+  async execute({ reply }) {
+    const start = Date.now();
+    await reply('🏓 Pong!');
+    const latency = Date.now() - start;
+    await reply(`⚡ Kecepatan respon: *${latency}ms*`);
+  },
+});
+
+registerCommand({
+  name: 'menu',
+  aliases: ['help', 'bantuan'],
+  category: 'general',
+  description: 'Menampilkan seluruh daftar menu & perintah bot',
+  usage: '.menu',
+  async execute({ reply, config, prefix, pushName }) {
+    const categories = getCommandsByCategory();
+    const categoryIcons = {
+      game: '🎮 GAME & KUIS',
+      osint: '🔍 OSINT & NETWORK',
+      ai: '🤖 ARTIFICIAL INTELLIGENCE',
+      programming: '💻 PEMROGRAMAN & DEV TOOLS',
+      general: '⚙️ UTILITY & UMUM',
+    };
+
+    let menuText = `Halo *${pushName}*! 👋\n`;
+    menuText += `Selamat datang di *${config.botName || 'NexBot'}*\n`;
+    menuText += `Prefix: \`${prefix}\`\n\n`;
+
+    for (const [cat, list] of Object.entries(categories)) {
+      const header = categoryIcons[cat] || `📁 ${cat.toUpperCase()}`;
+      const isEnabled = config.features && config.features[cat] !== false;
+      const statusTag = isEnabled ? '' : ' _(Nonaktif)_';
+
+      menuText += `┌───⊷ *${header}*${statusTag}\n`;
+      for (const item of list) {
+        menuText += `│ • \`${prefix}${item.name}\` : ${item.description}\n`;
+      }
+      menuText += `└───⊷\n\n`;
+    }
+
+    menuText += `💡 *Tips:* Ketik command sesuai panduan untuk menggunakan fitur.\n`;
+    menuText += `🌐 Web Dashboard aktif untuk memantau status bot & konfigurasi.`;
+
+    await reply(menuText.trim());
+  },
+});

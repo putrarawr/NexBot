@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexBot • WhatsApp Bot & Web Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            dark: {
+              900: '#0B0F17',
+              800: '#111827',
+              700: '#1F2937',
+              600: '#374151',
+            },
+            brand: {
+              500: '#10B981',
+              600: '#059669',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #111827; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4B5563; }
+  </style>
+</head>
+<body class="bg-dark-900 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
+
+  <!-- TOP NAVIGATION BAR -->
+  <header class="border-b border-dark-700 bg-dark-800/80 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <i data-lucide="bot" class="w-6 h-6 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="font-bold text-lg text-white tracking-tight" id="headerBotName">NexBot</h1>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">v1.0</span>
+          </div>
+          <p class="text-xs text-slate-400">WhatsApp Bot Multi-Device</p>
+        </div>
+      </div>
+
+      <!-- STATUS PILLS & AUTH BUTTON -->
+      <div class="flex items-center space-x-3">
+        <!-- Status Indicator Pill -->
+        <div id="statusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" id="statusDot"></span>
+          <span id="statusText">Memeriksa...</span>
+        </div>
+
+        <!-- RAM Pill -->
+        <div class="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs font-mono text-slate-300">
+          <i data-lucide="cpu" class="w-3.5 h-3.5 text-slate-400"></i>
+          <span id="ramUsage">-- MB</span>
+          <span class="text-slate-500">/ 512 MB</span>
+        </div>
+
+        <!-- Login / Admin Button -->
+        <button id="authBtn" onclick="toggleAuthModal()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition flex items-center space-x-1.5">
+          <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+          <span id="authBtnText">Login Admin</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SUB NAVIGATION TABS -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-dark-700/60 flex space-x-2 sm:space-x-4 overflow-x-auto custom-scrollbar py-1">
+      <button onclick="switchTab('connection')" id="tab-btn-connection" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-emerald-400 bg-emerald-500/10 transition flex items-center space-x-1.5 whitespace-nowrap">
+        <i data-lucide="smartphone" class="w-4 h-4"></i>
+        <span>Koneksi WhatsApp</span>
+      </button>
+      <button onclick="switchTab('features')" id="tab-btn-features" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5 whitespace-nowrap">
+        <i data-lucide="sliders" class="w-4 h-4"></i>
+        <span>Modul & Fitur</span>
+      </button>
+      <button onclick="switchTab('ai')" id="tab-btn-ai" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5 whitespace-nowrap">
+        <i data-lucide="sparkles" class="w-4 h-4"></i>
+        <span>Konfigurasi AI</span>
+      </button>
+      <button onclick="switchTab('logs')" id="tab-btn-logs" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5 whitespace-nowrap">
+        <i data-lucide="terminal" class="w-4 h-4"></i>
+        <span>Live Console Log</span>
+      </button>
+      <button onclick="switchTab('leaderboard')" id="tab-btn-leaderboard" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5 whitespace-nowrap">
+        <i data-lucide="trophy" class="w-4 h-4"></i>
+        <span>Skor & Leaderboard</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+
+    <!-- ALERT / NOTIF BANNER -->
+    <div id="alertBox" class="hidden mb-6 p-4 rounded-xl border flex items-center justify-between text-sm transition">
+      <div class="flex items-center space-x-3">
+        <i id="alertIcon" data-lucide="info" class="w-5 h-5 flex-shrink-0"></i>
+        <span id="alertMessage">Pesan notifikasi</span>
+      </div>
+      <button onclick="hideAlert()" class="text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <!-- ==================== TAB 1: KONEKSI WHATSAPP ==================== -->
+    <div id="tab-connection" class="tab-content space-y-6">
+      <!-- Grid 2 Kolom -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Kolom Kiri: Status Koneksi & Pairing Code Generator -->
+        <div class="lg:col-span-2 space-y-6">
+          <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6 shadow-sm">
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="link" class="w-5 h-5 text-emerald-400"></i>
+              <span>Hubungkan Bot WhatsApp</span>
+            </h2>
+            <p class="text-sm text-slate-400 mt-1">
+              Gunakan <b>Pairing Code 8-Digit</b> untuk menghubungkan bot tanpa perlu scan QR. Sangat praktis untuk VPS Serv00 atau server headless.
+            </p>
+
+            <!-- Pairing Form -->
+            <div class="mt-6 bg-dark-900/60 rounded-xl p-4 sm:p-5 border border-dark-700">
+              <label class="block text-xs font-medium text-slate-300 mb-2">
+                Nomor WhatsApp Bot (dengan kode negara tanpa +, contoh: 6281234567890)
+              </label>
+              <div class="flex flex-col sm:flex-row gap-3">
+                <div class="relative flex-1">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500 font-mono text-sm">
+                    +
+                  </div>
+                  <input type="text" id="phoneInput" placeholder="6281234567890" class="w-full bg-dark-800 border border-dark-600 rounded-lg pl-8 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono">
+                </div>
+                <button onclick="generatePairingCode()" id="btnPairing" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-600/20 whitespace-nowrap">
+                  <i data-lucide="key" class="w-4 h-4"></i>
+                  <span>Dapatkan Pairing Code</span>
+                </button>
+              </div>
+
+              <!-- Output Pairing Code -->
+              <div id="pairingCodeBox" class="hidden mt-5 p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-center">
+                <p class="text-xs text-emerald-300 font-medium">KODE TAUTAN PERANGKAT (PAIRING CODE):</p>
+                <div class="my-2 flex items-center justify-center space-x-3">
+                  <span id="pairingCodeDisplay" class="font-mono text-3xl font-extrabold tracking-widest text-emerald-400 select-all">----</span>
+                  <button onclick="copyPairingCode()" title="Salin Kode" class="p-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition">
+                    <i data-lucide="copy" class="w-5 h-5"></i>
+                  </button>
+                </div>
+                <p class="text-xs text-slate-400 mt-2">
+                  Buka WhatsApp di HP &gt; <b>Perangkat Tertaut</b> &gt; <b>Tautkan Perangkat</b> &gt; <b>Tautkan dengan nomor telepon saja</b> &gt; Masukkan 8 digit kode di atas.
+                </p>
+              </div>
+            </div>
+
+            <!-- Bot Controls (Restart & Logout) -->
+            <div class="mt-6 pt-5 border-t border-dark-700/60 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center space-x-3">
+                <button onclick="restartBot()" class="px-3.5 py-2 rounded-lg bg-dark-700 hover:bg-dark-600 text-slate-200 text-xs font-medium transition flex items-center space-x-1.5">
+                  <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                  <span>Restart Socket Bot</span>
+                </button>
+                <button onclick="logoutBot()" class="px-3.5 py-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/40 text-xs font-medium transition flex items-center space-x-1.5">
+                  <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                  <span>Logout Sesi</span>
+                </button>
+              </div>
+              <span class="text-xs text-slate-500" id="uptimeDisplay">Uptime: --</span>
+            </div>
+          </div>
+
+          <!-- Quick Metrics Card -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div class="bg-dark-800 p-4 rounded-xl border border-dark-700">
+              <p class="text-xs text-slate-400">Total Perintah</p>
+              <p class="text-xl font-bold text-white mt-1" id="statTotalCommands">0</p>
+            </div>
+            <div class="bg-dark-800 p-4 rounded-xl border border-dark-700">
+              <p class="text-xs text-slate-400">Pengguna Terdaftar</p>
+              <p class="text-xl font-bold text-emerald-400 mt-1" id="statTotalUsers">0</p>
+            </div>
+            <div class="bg-dark-800 p-4 rounded-xl border border-dark-700">
+              <p class="text-xs text-slate-400">Pemakaian RAM</p>
+              <p class="text-xl font-bold text-teal-400 mt-1" id="statRamMetric">-- MB</p>
+            </div>
+            <div class="bg-dark-800 p-4 rounded-xl border border-dark-700">
+              <p class="text-xs text-slate-400">Node Environment</p>
+              <p class="text-xl font-bold text-slate-300 mt-1" id="statNodeVersion">--</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Kolom Kanan: QR Code Scanner (Fallback) -->
+        <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6 shadow-sm flex flex-col items-center justify-center text-center">
+          <h3 class="text-sm font-bold text-white flex items-center space-x-2">
+            <i data-lucide="qr-code" class="w-4 h-4 text-emerald-400"></i>
+            <span>Scan QR Code (Opsi Alternatif)</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-1 mb-4">
+            Jika kamu lebih memilih scan kamera, QR Code aktif akan muncul di bawah ini.
+          </p>
+
+          <div id="qrContainer" class="w-64 h-64 bg-dark-900 rounded-xl border border-dark-700 flex flex-col items-center justify-center p-3 relative overflow-hidden">
+            <img id="qrImage" src="" alt="QR Code" class="hidden w-full h-full object-contain rounded-lg">
+            <div id="qrPlaceholder" class="flex flex-col items-center justify-center text-slate-500 space-y-2">
+              <i data-lucide="check-circle-2" class="w-10 h-10 text-emerald-500/40"></i>
+              <span class="text-xs" id="qrPlaceholderText">Bot Terhubung</span>
+            </div>
+          </div>
+
+          <div class="mt-4 text-xs text-slate-500">
+            QR diperbarui secara otomatis setiap beberapa detik saat menunggu sesi.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ==================== TAB 2: MODUL & FITUR ==================== -->
+    <div id="tab-features" class="tab-content hidden space-y-6">
+      <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center space-x-2">
+              <i data-lucide="sliders" class="w-5 h-5 text-emerald-400"></i>
+              <span>Manajemen Modul & Fitur</span>
+            </h2>
+            <p class="text-sm text-slate-400 mt-1">Aktifkan atau nonaktifkan kelompok perintah bot secara instan tanpa perlu restart server.</p>
+          </div>
+          <button onclick="saveFeatureConfig()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 shadow-md">
+            <i data-lucide="save" class="w-4 h-4"></i>
+            <span>Simpan Perubahan</span>
+          </button>
+        </div>
+
+        <!-- Setting Prefix & Bot Name -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 p-4 bg-dark-900/60 rounded-xl border border-dark-700">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Nama Bot</label>
+            <input type="text" id="configBotName" class="w-full bg-dark-800 border border-dark-600 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Prefix Command</label>
+            <input type="text" id="configPrefix" class="w-full bg-dark-800 border border-dark-600 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-emerald-500 font-mono">
+          </div>
+        </div>
+
+        <!-- 4 Grid Toggle Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+          <!-- Feature 1: Game -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <i data-lucide="gamepad-2" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Game & Teka-Teki</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Tebak Gambar, Tebak Kata, Asah Otak, Kuis Matematika Cepat, Tic-Tac-Toe 3x3, dan Sistem Skor/Leaderboard.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.tebakgambar</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.math</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.tictactoe</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-game" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <!-- Feature 2: OSINT -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                  <i data-lucide="shield-check" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">OSINT & Network Diagnostic</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Pelacak IP Geolocation, WHOIS domain, DNS DoH Lookup, Profil GitHub, Subdomain crt.sh, dan HTTP Headers.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.ip</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.whois</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.dns</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.subdomain</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-osint" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <!-- Feature 3: AI -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <i data-lucide="bot" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Kecerdasan Buatan (AI)</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Chatbot tanya jawab cerdas, analisis dan penjelas kode, perangkum artikel, serta penerjemah bahasa.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.ai</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.explain</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.summarize</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.translate</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-ai" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <!-- Feature 4: Programming -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <i data-lucide="code" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Pemrograman & Dev Tools</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Eksekutor kode sandbox 9+ bahasa (Python, JS, Go, Rust, Java, PHP), penguji Regex, format JSON, dan Cheatsheet.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.run py ...</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.regex</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.json</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">.cheat git</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-programming" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 3: KONFIGURASI AI ==================== -->
+    <div id="tab-ai" class="tab-content hidden space-y-6">
+      <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6">
+        <h2 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="sparkles" class="w-5 h-5 text-purple-400"></i>
+          <span>Pengaturan AI & Model Provider</span>
+        </h2>
+        <p class="text-sm text-slate-400 mt-1">
+          Secara default, bot menggunakan <b>Zero-Key Free AI Fallback</b> (bisa langsung pakai gratis tanpa daftar apa pun). Jika kamu punya API Key pribadi (Groq / Gemini), kamu dapat memasukkannya di bawah ini untuk kecepatan ultra dan respon lebih cerdas.
+        </p>
+
+        <div class="mt-6 space-y-5 max-w-2xl">
+          <!-- Provider Selector -->
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Mode Prioritas AI</label>
+            <select id="configAiProvider" class="w-full bg-dark-800 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+              <option value="hybrid">Hybrid (Utamakan Groq / Gemini jika ada, jika tidak pakai Free Fallback)</option>
+              <option value="groq">Hanya Groq API (Llama 3)</option>
+              <option value="gemini">Hanya Google Gemini API</option>
+              <option value="free">Hanya Free Endpoint (Tanpa API Key)</option>
+            </select>
+          </div>
+
+          <!-- Groq API Key -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-medium text-slate-300">Groq API Key (Gratis, Respon Super Cepat)</label>
+              <a href="https://console.groq.com/keys" target="_blank" class="text-xs text-emerald-400 hover:underline flex items-center space-x-1">
+                <span>Daftar Gratis Groq</span>
+                <i data-lucide="external-link" class="w-3 h-3"></i>
+              </a>
+            </div>
+            <div class="relative">
+              <input type="password" id="configGroqKey" placeholder="gsk_..." class="w-full bg-dark-900 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono">
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1">Kosongkan jika ingin menggunakan free fallback.</p>
+          </div>
+
+          <!-- Google Gemini API Key -->
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-medium text-slate-300">Google Gemini API Key (Gratis Google AI Studio)</label>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-xs text-purple-400 hover:underline flex items-center space-x-1">
+                <span>Dapatkan Key Gemini</span>
+                <i data-lucide="external-link" class="w-3 h-3"></i>
+              </a>
+            </div>
+            <div class="relative">
+              <input type="password" id="configGeminiKey" placeholder="AIzaSy..." class="w-full bg-dark-900 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-purple-500 font-mono">
+            </div>
+          </div>
+
+          <!-- Save Button -->
+          <div class="pt-3">
+            <button onclick="saveAiConfig()" class="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-semibold transition flex items-center space-x-2 shadow-lg shadow-purple-600/20">
+              <i data-lucide="save" class="w-4 h-4"></i>
+              <span>Simpan Konfigurasi AI</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 4: LIVE CONSOLE LOGS ==================== -->
+    <div id="tab-logs" class="tab-content hidden space-y-4">
+      <div class="bg-dark-800 rounded-2xl border border-dark-700 p-4 sm:p-6 flex flex-col h-[650px]">
+        <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-dark-700">
+          <div class="flex items-center space-x-2">
+            <div class="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></div>
+            <h2 class="text-sm font-bold text-white">Live Stream Console (Server-Sent Events)</h2>
+          </div>
+          <div class="flex items-center space-x-2 text-xs">
+            <label class="flex items-center space-x-1.5 text-slate-300 cursor-pointer">
+              <input type="checkbox" id="autoScrollCheck" checked class="rounded bg-dark-700 border-dark-600 text-emerald-500 focus:ring-0">
+              <span>Auto-Scroll</span>
+            </label>
+            <button onclick="clearLogs()" class="px-3 py-1.5 rounded-lg bg-dark-700 hover:bg-dark-600 text-slate-300 transition">
+              Bersihkan
+            </button>
+          </div>
+        </div>
+
+        <!-- Terminal Box -->
+        <div id="logTerminal" class="flex-1 bg-dark-900 rounded-xl p-4 mt-4 font-mono text-xs overflow-y-auto custom-scrollbar space-y-1 text-slate-300">
+          <div class="text-slate-500 italic">Menghubungkan ke log stream realtime...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== TAB 5: LEADERBOARD ==================== -->
+    <div id="tab-leaderboard" class="tab-content hidden space-y-6">
+      <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6">
+        <h2 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="trophy" class="w-5 h-5 text-amber-400"></i>
+          <span>Papan Peringkat Pemain (Leaderboard)</span>
+        </h2>
+        <p class="text-sm text-slate-400 mt-1">Daftar pengguna dengan skor permainan tertinggi yang tersimpan di database bot.</p>
+
+        <div class="mt-6 overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead class="text-xs uppercase bg-dark-900/60 text-slate-400 border-b border-dark-700">
+              <tr>
+                <th class="py-3 px-4">Peringkat</th>
+                <th class="py-3 px-4">Nama Pengguna</th>
+                <th class="py-3 px-4">Skor Poin</th>
+                <th class="py-3 px-4">Kemenangan</th>
+                <th class="py-3 px-4">Aktivitas Terakhir</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboardBody" class="divide-y divide-dark-700/60 font-mono text-xs text-slate-300">
+              <tr>
+                <td colspan="5" class="py-6 text-center text-slate-500 font-sans">Memuat data papan peringkat...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- AUTH / PIN MODAL -->
+  <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-dark-800 border border-dark-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
+      <h3 class="text-base font-bold text-white flex items-center space-x-2">
+        <i data-lucide="shield-alert" class="w-5 h-5 text-emerald-400"></i>
+        <span>Login Administrator</span>
+      </h3>
+      <p class="text-xs text-slate-400 mt-1">Masukkan Password atau PIN Admin untuk membuka kontrol bot dan konfigurasi.</p>
+
+      <div class="mt-4">
+        <label class="block text-xs font-medium text-slate-300 mb-1.5">Password Admin</label>
+        <input type="password" id="adminPasswordInput" placeholder="Masukkan password" class="w-full bg-dark-900 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+      </div>
+
+      <div class="mt-5 flex items-center justify-end space-x-3">
+        <button onclick="toggleAuthModal()" class="px-4 py-2 rounded-lg bg-dark-700 hover:bg-dark-600 text-slate-300 text-xs font-medium transition">
+          Batal
+        </button>
+        <button onclick="submitLogin()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md transition">
+          Masuk
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    let authToken = localStorage.getItem('nexbot_token') || '';
+    let currentConfig = null;
+    let sseSource = null;
+
+    // Inisialisasi Lucide Icons
+    function renderIcons() {
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    }
+
+    // Switch Tabs
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('text-emerald-400', 'bg-emerald-500/10');
+        btn.classList.add('text-slate-400');
+      });
+
+      const targetTab = document.getElementById('tab-' + tabId);
+      const targetBtn = document.getElementById('tab-btn-' + tabId);
+
+      if (targetTab) targetTab.classList.remove('hidden');
+      if (targetBtn) {
+        targetBtn.classList.remove('text-slate-400');
+        targetBtn.classList.add('text-emerald-400', 'bg-emerald-500/10');
+      }
+
+      if (tabId === 'leaderboard') loadLeaderboard();
+      renderIcons();
+    }
+
+    // Alert helper
+    function showAlert(msg, isSuccess = true) {
+      const box = document.getElementById('alertBox');
+      const text = document.getElementById('alertMessage');
+      const icon = document.getElementById('alertIcon');
+
+      box.classList.remove('hidden', 'bg-emerald-950/40', 'border-emerald-500/30', 'text-emerald-300', 'bg-rose-950/40', 'border-rose-500/30', 'text-rose-300');
+
+      if (isSuccess) {
+        box.classList.add('bg-emerald-950/40', 'border-emerald-500/30', 'text-emerald-300');
+        icon.setAttribute('data-lucide', 'check-circle-2');
+      } else {
+        box.classList.add('bg-rose-950/40', 'border-rose-500/30', 'text-rose-300');
+        icon.setAttribute('data-lucide', 'alert-circle');
+      }
+
+      text.textContent = msg;
+      box.classList.remove('hidden');
+      renderIcons();
+
+      setTimeout(() => { hideAlert(); }, 5000);
+    }
+
+    function hideAlert() {
+      document.getElementById('alertBox').classList.add('hidden');
+    }
+
+    // Auth Modal & Login
+    function toggleAuthModal() {
+      const modal = document.getElementById('authModal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        document.getElementById('adminPasswordInput').focus();
+      }
+    }
+
+    async function submitLogin() {
+      const password = document.getElementById('adminPasswordInput').value.trim();
+      if (!password) return;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+
+        if (data.success && data.token) {
+          authToken = data.token;
+          localStorage.setItem('nexbot_token', authToken);
+          toggleAuthModal();
+          updateAuthUI();
+          showAlert('Berhasil login sebagai Administrator!');
+        } else {
+          alert('Password admin salah!');
+        }
+      } catch (err) {
+        alert('Gagal menghubungi server login.');
+      }
+    }
+
+    function updateAuthUI() {
+      const btn = document.getElementById('authBtn');
+      const text = document.getElementById('authBtnText');
+      if (authToken) {
+        text.textContent = 'Admin Aktif';
+        btn.classList.remove('bg-emerald-600', 'hover:bg-emerald-500');
+        btn.classList.add('bg-dark-700', 'hover:bg-dark-600', 'text-emerald-400');
+      } else {
+        text.textContent = 'Login Admin';
+        btn.classList.remove('bg-dark-700', 'hover:bg-dark-600', 'text-emerald-400');
+        btn.classList.add('bg-emerald-600', 'hover:bg-emerald-500', 'text-white');
+      }
+      renderIcons();
+    }
+
+    // Fetch Status & Polling
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+
+        currentConfig = data.config;
+
+        // Update header & metrics
+        document.getElementById('headerBotName').textContent = data.config.botName || 'NexBot';
+        document.getElementById('ramUsage').textContent = data.system.memoryRssMb + ' MB';
+        document.getElementById('statRamMetric').textContent = data.system.memoryRssMb + ' MB';
+        document.getElementById('statNodeVersion').textContent = data.system.nodeVersion;
+        document.getElementById('statTotalCommands').textContent = data.stats.totalCommands || 0;
+        document.getElementById('statTotalUsers').textContent = data.stats.totalUsers || 0;
+
+        // Uptime format
+        const up = data.bot.uptime || 0;
+        const h = Math.floor(up / 3600);
+        const m = Math.floor((up % 3600) / 60);
+        const s = up % 60;
+        document.getElementById('uptimeDisplay').textContent = `Uptime: ${h}j ${m}m ${s}d`;
+
+        // Update status badge
+        const badge = document.getElementById('statusBadge');
+        const dot = document.getElementById('statusDot');
+        const stText = document.getElementById('statusText');
+
+        const status = data.bot.status;
+        if (status === 'connected') {
+          dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+          stText.textContent = `Online (${data.bot.connectedNumber || 'Bot'})`;
+          stText.className = 'text-emerald-300 font-semibold';
+        } else if (status === 'waiting_qr' || status === 'waiting_pairing') {
+          dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+          stText.textContent = 'Menunggu Pairing / Scan QR';
+          stText.className = 'text-amber-300 font-semibold';
+        } else {
+          dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-400';
+          stText.textContent = 'Terputus';
+          stText.className = 'text-rose-300 font-semibold';
+        }
+
+        // QR Code handler
+        const qrImg = document.getElementById('qrImage');
+        const qrPlc = document.getElementById('qrPlaceholder');
+        const qrPlcText = document.getElementById('qrPlaceholderText');
+
+        if (data.bot.qrDataUrl && status !== 'connected') {
+          qrImg.src = data.bot.qrDataUrl;
+          qrImg.classList.remove('hidden');
+          qrPlc.classList.add('hidden');
+        } else {
+          qrImg.classList.add('hidden');
+          qrPlc.classList.remove('hidden');
+          qrPlcText.textContent = status === 'connected' ? `Terkoneksi: ${data.bot.connectedNumber}` : 'Menyiapkan QR...';
+        }
+
+        // Feature toggles sync jika belum diisi manual
+        if (!document.getElementById('configBotName').value) {
+          document.getElementById('configBotName').value = data.config.botName || '';
+          document.getElementById('configPrefix').value = data.config.prefix || '.';
+          document.getElementById('toggle-game').checked = data.config.features.game !== false;
+          document.getElementById('toggle-osint').checked = data.config.features.osint !== false;
+          document.getElementById('toggle-ai').checked = data.config.features.ai !== false;
+          document.getElementById('toggle-programming').checked = data.config.features.programming !== false;
+          document.getElementById('configAiProvider').value = data.config.aiProvider || 'hybrid';
+        }
+
+      } catch (err) {
+        console.warn('Gagal memuat status bot:', err);
+      }
+    }
+
+    // Request Pairing Code
+    async function generatePairingCode() {
+      if (!authToken) {
+        toggleAuthModal();
+        return;
+      }
+
+      const phone = document.getElementById('phoneInput').value.trim();
+      if (!phone) {
+        alert('Masukkan nomor telepon WhatsApp bot!');
+        return;
+      }
+
+      const btn = document.getElementById('btnPairing');
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i><span>Meminta Kode...</span>';
+      renderIcons();
+
+      try {
+        const res = await fetch('/api/pairing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ phoneNumber: phone }),
+        });
+
+        const data = await res.json();
+        if (data.success && data.pairingCode) {
+          document.getElementById('pairingCodeDisplay').textContent = data.pairingCode;
+          document.getElementById('pairingCodeBox').classList.remove('hidden');
+          showAlert('Pairing Code berhasil dibuat!');
+        } else {
+          alert('Gagal mendapatkan pairing code: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error saat request pairing code.');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="key" class="w-4 h-4"></i><span>Dapatkan Pairing Code</span>';
+        renderIcons();
+      }
+    }
+
+    function copyPairingCode() {
+      const code = document.getElementById('pairingCodeDisplay').textContent.trim();
+      navigator.clipboard.writeText(code);
+      showAlert('Kode tautan disalin ke clipboard!');
+    }
+
+    // Restart & Logout Bot
+    async function restartBot() {
+      if (!authToken) return toggleAuthModal();
+      if (!confirm('Yakin ingin merestart koneksi socket WhatsApp?')) return;
+
+      try {
+        const res = await fetch('/api/bot/restart', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const data = await res.json();
+        showAlert(data.message || 'Restart socket telah diminta.');
+      } catch {
+        alert('Gagal mengirim perintah restart.');
+      }
+    }
+
+    async function logoutBot() {
+      if (!authToken) return toggleAuthModal();
+      if (!confirm('Yakin ingin logout? Kamu harus memasukkan pairing code lagi untuk menghubungkan bot.')) return;
+
+      try {
+        const res = await fetch('/api/bot/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+        const data = await res.json();
+        showAlert(data.message || 'Logout berhasil.');
+      } catch {
+        alert('Gagal mengirim perintah logout.');
+      }
+    }
+
+    // Save Features Config
+    async function saveFeatureConfig() {
+      if (!authToken) return toggleAuthModal();
+
+      const payload = {
+        botName: document.getElementById('configBotName').value.trim(),
+        prefix: document.getElementById('configPrefix').value.trim() || '.',
+        features: {
+          game: document.getElementById('toggle-game').checked,
+          osint: document.getElementById('toggle-osint').checked,
+          ai: document.getElementById('toggle-ai').checked,
+          programming: document.getElementById('toggle-programming').checked,
+        }
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('Pengaturan modul & fitur berhasil disimpan!');
+        } else {
+          alert('Gagal menyimpan: ' + (data.error || 'Unknown'));
+        }
+      } catch {
+        alert('Gagal menghubungi server untuk menyimpan config.');
+      }
+    }
+
+    // Save AI Config
+    async function saveAiConfig() {
+      if (!authToken) return toggleAuthModal();
+
+      const payload = {
+        aiProvider: document.getElementById('configAiProvider').value,
+      };
+
+      const groq = document.getElementById('configGroqKey').value.trim();
+      if (groq) payload.groqApiKey = groq;
+
+      const gemini = document.getElementById('configGeminiKey').value.trim();
+      if (gemini) payload.geminiApiKey = gemini;
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert('Pengaturan AI & API Key berhasil disimpan!');
+        } else {
+          alert('Gagal menyimpan config AI.');
+        }
+      } catch {
+        alert('Error saat menyimpan pengaturan AI.');
+      }
+    }
+
+    // Live Logs SSE
+    function initLogStream() {
+      const terminal = document.getElementById('logTerminal');
+
+      if (sseSource) {
+        sseSource.close();
+      }
+
+      sseSource = new EventSource('/api/logs/stream');
+
+      sseSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'history') {
+            terminal.innerHTML = '';
+            data.logs.forEach(appendLogLine);
+          } else if (data.type === 'log') {
+            appendLogLine(data.entry);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      sseSource.onerror = () => {
+        // SSE reconnects automatically
+      };
+    }
+
+    function appendLogLine(entry) {
+      const terminal = document.getElementById('logTerminal');
+      const div = document.createElement('div');
+      div.className = 'leading-relaxed hover:bg-dark-800/60 px-1 rounded flex items-start space-x-2';
+
+      const time = entry.timestamp ? entry.timestamp.split('T')[1].slice(0, 8) : '--:--:--';
+      let levelColor = 'text-slate-400';
+      if (entry.level === 'warn') levelColor = 'text-amber-400';
+      if (entry.level === 'error') levelColor = 'text-rose-400';
+      if (entry.level === 'bot') levelColor = 'text-emerald-400 font-semibold';
+
+      div.innerHTML = `
+        <span class="text-slate-600 select-none">[${time}]</span>
+        <span class="${levelColor} select-none uppercase text-[10px] w-12 font-bold">[${entry.level}]</span>
+        <span class="text-slate-200 break-all flex-1">${escapeHtml(entry.message)}</span>
+      `;
+
+      terminal.appendChild(div);
+
+      if (document.getElementById('autoScrollCheck').checked) {
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    }
+
+    function clearLogs() {
+      document.getElementById('logTerminal').innerHTML = '<div class="text-slate-500 italic">Log dibersihkan.</div>';
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Leaderboard
+    async function loadLeaderboard() {
+      const tbody = document.getElementById('leaderboardBody');
+      try {
+        const res = await fetch('/api/leaderboard');
+        const list = await res.json();
+
+        if (!list || list.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500 font-sans">Belum ada skor tercatat. Mainkan game di WhatsApp untuk mencetak rekor!</td></tr>';
+          return;
+        }
+
+        const medals = ['🥇', '🥈', '🥉'];
+        tbody.innerHTML = list.map((user, i) => {
+          const rank = medals[i] || (i + 1);
+          const dateStr = user.lastActive ? new Date(user.lastActive).toLocaleDateString('id-ID') : '-';
+          return `
+            <tr class="hover:bg-dark-700/30 transition">
+              <td class="py-3 px-4 font-bold">${rank}</td>
+              <td class="py-3 px-4 text-white font-sans font-medium">${escapeHtml(user.name)}</td>
+              <td class="py-3 px-4 text-emerald-400 font-bold">${user.score || 0} pts</td>
+              <td class="py-3 px-4 text-slate-400">${user.gamesWon || 0}x</td>
+              <td class="py-3 px-4 text-slate-500">${dateStr}</td>
+            </tr>
+          `;
+        }).join('');
+      } catch {
+        tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-rose-400 font-sans">Gagal memuat papan peringkat.</td></tr>';
+      }
+    }
+
+    // Boot
+    window.addEventListener('DOMContentLoaded', () => {
+      renderIcons();
+      updateAuthUI();
+      fetchStatus();
+      setInterval(fetchStatus, 3000);
+      initLogStream();
+    });
+  </script>
+</body>
+</html>

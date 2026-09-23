@@ -1,0 +1,33 @@
+{
+  "name": "bot-wa-dashboard",
+  "version": "1.0.0",
+  "description": "WhatsApp Multi-Device Bot with Embedded Web Dashboard for Serv00 and Linux VPS",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node tests/smoke.test.js"
+  },
+  "keywords": [
+    "whatsapp-bot",
+    "baileys",
+    "dashboard",
+    "serv00",
+    "osint",
+    "game",
+    "ai",
+    "programming"
+  ],
+  "author": "Putra",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "qrcode": "^1.5.4"
+  }
+}
