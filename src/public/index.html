@@ -410,6 +410,29 @@
               <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
             </label>
           </div>
+
+          <!-- Feature 7: Anti-Spam Kick & Auto-Add -->
+          <div class="p-5 rounded-xl bg-dark-900/40 border border-dark-700 flex items-start justify-between">
+            <div>
+              <div class="flex items-center space-x-2.5">
+                <div class="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <i data-lucide="user-x" class="w-5 h-5"></i>
+                </div>
+                <h3 class="font-bold text-sm text-white">Anti-Spam Kick & Auto-Add (Grup)</h3>
+              </div>
+              <p class="text-xs text-slate-400 mt-2">
+                Otomatis kick member yang spam berkali-kali di grup (3-strike), lalu dimasukkan kembali setelah 8 detik sebagai efek jera wkwk.
+              </p>
+              <div class="mt-3 flex flex-wrap gap-1.5 text-[10px] font-mono text-slate-400">
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">Bot Wajib Admin</span>
+                <span class="px-2 py-0.5 rounded bg-dark-800 border border-dark-600">Auto Re-Add 8s</span>
+              </div>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer ml-4">
+              <input type="checkbox" id="toggle-antispamkick" class="sr-only peer">
+              <div class="w-11 h-6 bg-dark-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
         </div>
       </div>
     </div>
@@ -536,17 +559,22 @@
   </main>
 
   <!-- AUTH / PIN MODAL -->
-  <div id="authModal" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+  <div id="authModal" onclick="if(event.target === this) toggleAuthModal()" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-dark-800 border border-dark-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl relative">
-      <h3 class="text-base font-bold text-white flex items-center space-x-2">
-        <i data-lucide="shield-alert" class="w-5 h-5 text-emerald-400"></i>
-        <span>Login Administrator</span>
-      </h3>
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-bold text-white flex items-center space-x-2">
+          <i data-lucide="shield-alert" class="w-5 h-5 text-emerald-400"></i>
+          <span>Login Administrator</span>
+        </h3>
+        <button onclick="toggleAuthModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-dark-700 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
       <p class="text-xs text-slate-400 mt-1">Masukkan Password atau PIN Admin untuk membuka kontrol bot dan konfigurasi.</p>
 
       <div class="mt-4">
         <label class="block text-xs font-medium text-slate-300 mb-1.5">Password Admin</label>
-        <input type="password" id="adminPasswordInput" placeholder="Masukkan password" class="w-full bg-dark-900 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+        <input type="password" id="adminPasswordInput" placeholder="Masukkan password (default: admin123)" onkeydown="if(event.key === 'Enter') submitLogin()" class="w-full bg-dark-900 border border-dark-600 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500">
       </div>
 
       <div class="mt-5 flex items-center justify-end space-x-3">
@@ -649,10 +677,10 @@
           updateAuthUI();
           showAlert('Berhasil login sebagai Administrator!');
         } else {
-          alert('Password admin salah!');
+          showAlert(data.error || 'Password admin salah!', false);
         }
       } catch (err) {
-        alert('Gagal menghubungi server login.');
+        showAlert('Gagal menghubungi server login.', false);
       }
     }
 
@@ -739,8 +767,9 @@
           document.getElementById('toggle-programming').checked = data.config.features.programming !== false;
           document.getElementById('toggle-selfmode').checked = data.config.selfMode !== false;
           document.getElementById('toggle-autocomplete').checked = data.config.autocomplete !== false;
+          document.getElementById('toggle-antispamkick').checked = data.config.antiSpamKick !== false;
           document.getElementById('configAiProvider').value = data.config.aiProvider || 'hybrid';
-
+        }
       } catch (err) {
         console.warn('Gagal memuat status bot:', err);
       }
@@ -845,6 +874,7 @@
         },
         selfMode: document.getElementById('toggle-selfmode').checked,
         autocomplete: document.getElementById('toggle-autocomplete').checked,
+        antiSpamKick: document.getElementById('toggle-antispamkick').checked,
       };
 
       try {

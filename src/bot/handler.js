@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../config.js';
 import { checkRateLimit, createReplyHelper, isBotSentMessage } from './antiBan.js';
+import { checkGroupSpamKick } from './antiSpamKick.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import {
@@ -75,6 +76,21 @@ export async function messageHandler(sock, chatUpdate) {
     const reply = createReplyHelper(sock, remoteJid, msg);
     const config = getConfig();
     const prefix = config.prefix || '.';
+
+    // 0. Anti-Spam Group Kick & Auto Re-Add
+    if (isGroup && !msg.key.fromMe) {
+      const isSpamIntercepted = await checkGroupSpamKick({
+        sock,
+        jid: remoteJid,
+        sender,
+        isGroup,
+        reply,
+        config,
+      });
+      if (isSpamIntercepted) {
+        return;
+      }
+    }
 
     // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini!
     // (Bisa dijawab oleh user lain ATAU pemilik bot di chat sendiri)

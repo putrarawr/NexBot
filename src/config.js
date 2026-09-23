@@ -14,6 +14,8 @@ const DEFAULT_CONFIG = {
   ownerNumber: process.env.OWNER_NUMBER || '',
   selfMode: true,
   autocomplete: true,
+  antiSpamKick: true,
+  reAddDelaySec: 8,
   features: {
     game: true,
     osint: true,
