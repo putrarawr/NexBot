@@ -10,19 +10,33 @@
     "150349658751133@lid": {
       "jid": "150349658751133@lid",
       "name": "Paiss",
-      "score": 1250,
-      "gamesWon": 32,
-      "lastActive": "2026-09-23T07:25:43.408Z"
+      "score": 1300,
+      "gamesWon": 33,
+      "lastActive": "2026-09-23T07:49:18.010Z"
+    },
+    "35386302677214@lid": {
+      "jid": "35386302677214@lid",
+      "name": "putra",
+      "score": 125,
+      "gamesWon": 2,
+      "lastActive": "2026-09-23T07:51:03.700Z"
+    },
+    "247489068314634@lid": {
+      "jid": "247489068314634@lid",
+      "name": "manusia",
+      "score": 75,
+      "gamesWon": 1,
+      "lastActive": "2026-09-23T08:07:56.460Z"
     }
   },
   "stats": {
-    "totalCommands": 142,
+    "totalCommands": 148,
     "byCategory": {
-      "game": 43,
+      "game": 48,
       "osint": 0,
       "ai": 1,
       "programming": 4,
-      "general": 94
+      "general": 95
     }
   }
 }

@@ -4,6 +4,7 @@ import { checkRateLimit, createReplyHelper, isBotSentMessage } from './antiBan.j
 import { checkGroupSpamKick } from './antiSpamKick.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
+import { handleAfkInteractions } from '../modules/group/index.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -90,6 +91,17 @@ export async function messageHandler(sock, chatUpdate) {
       if (isSpamIntercepted) {
         return;
       }
+    }
+
+    // Interaksi AFK (Member kembali dari AFK atau me-mention member AFK)
+    if (isGroup && !msg.key.fromMe) {
+      await handleAfkInteractions({
+        sender,
+        pushName,
+        text,
+        contextInfo: messageContent.extendedTextMessage?.contextInfo,
+        reply,
+      });
     }
 
     // 1. Cek apakah ada game aktif yang sedang menunggu jawaban di chat ini!
@@ -238,6 +250,9 @@ registerCommand({
   async execute({ reply, config, prefix, pushName }) {
     const categories = getCommandsByCategory();
     const categoryIcons = {
+      media: '🎨 MEDIA, STIKER & PHOTOLIVE',
+      downloader: '📥 SOCIAL MEDIA DOWNLOADER',
+      group: '👥 GRUP & MANAJEMEN',
       game: '🎮 GAME & KUIS',
       osint: '🔍 OSINT & NETWORK',
       ai: '🤖 ARTIFICIAL INTELLIGENCE',

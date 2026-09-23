@@ -11,7 +11,10 @@
     "game": true,
     "osint": true,
     "ai": true,
-    "programming": true
+    "programming": true,
+    "media": true,
+    "downloader": true,
+    "group": true
   },
   "aiProvider": "hybrid",
   "groqApiKey": "",

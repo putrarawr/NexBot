@@ -13,7 +13,11 @@ import { registerGameCommands } from '../src/modules/game/index.js';
 import { registerOsintCommands } from '../src/modules/osint/index.js';
 import { registerAiCommands } from '../src/modules/ai/index.js';
 import { registerProgrammingCommands } from '../src/modules/programming/index.js';
-
+import { registerMediaCommands } from '../src/modules/media/index.js';
+import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
+import { registerGroupCommands, setAfk, getAfk, removeAfk } from '../src/modules/group/index.js';
+import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
+import { execSync } from 'node:child_process';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -116,6 +120,9 @@ async function runAllTests() {
     registerOsintCommands();
     registerAiCommands();
     registerProgrammingCommands();
+    registerMediaCommands();
+    registerDownloaderCommands();
+    registerGroupCommands();
 
     const expectedCommands = [
       'ping', 'menu',
@@ -123,6 +130,9 @@ async function runAllTests() {
       'ip', 'whois', 'dns', 'github', 'subdomain', 'headers',
       'ai', 'explain', 'summarize', 'translate',
       'run', 'regex', 'json', 'cheat',
+      'sticker', 'toimg', 'qc', 'photolive',
+      'tiktok',
+      'hidetag', 'afk',
     ];
 
     for (const cmd of expectedCommands) {
@@ -204,6 +214,40 @@ async function runAllTests() {
     });
     assert.ok(replyCount >= 1, 'Self-chat answering active game without prefix should win');
     assert.ok(lastReply.includes('BENAR SEKALI'), 'Should announce correct answer');
+  });
+
+  // 4c. Media & Sticker Tools Tests
+  console.log('\n🎨 4c. Media, Sticker & PhotoLive Tools:');
+  await test('imageToWebpSticker and stickerToPng convert accurately', async () => {
+    const dummyJpg = execSync('ffmpeg -y -f lavfi -i color=c=red:s=100x100:d=1 -vframes 1 -f image2 -');
+    const webpBuffer = await imageToWebpSticker(dummyJpg);
+    assert.ok(webpBuffer.length > 50, 'WebP buffer should be valid');
+    assert.equal(webpBuffer.subarray(0, 4).toString(), 'RIFF');
+    assert.equal(webpBuffer.subarray(8, 12).toString(), 'WEBP');
+
+    const pngBuffer = await stickerToPng(webpBuffer);
+    assert.ok(pngBuffer.length > 50, 'PNG buffer should be valid');
+    assert.equal(pngBuffer.subarray(1, 4).toString(), 'PNG');
+  });
+
+  await test('generateQuoteSticker renders aesthetic quote card', async () => {
+    const qcWebp = await generateQuoteSticker('Putra', 'Kata-kata mutiara hari ini', '628123456');
+    assert.ok(qcWebp.length > 100);
+    assert.equal(qcWebp.subarray(8, 12).toString(), 'WEBP');
+  });
+
+  // 4d. Group Utility & AFK Tests
+  console.log('\n👥 4d. Group Management & AFK Tracking:');
+  await test('AFK store tracks, checks, and removes status correctly', () => {
+    const userJid = 'user_afk_test@s.whatsapp.net';
+    setAfk(userJid, 'Sedang makan siang', 'Putra');
+    const afk = getAfk(userJid);
+    assert.ok(afk);
+    assert.equal(afk.reason, 'Sedang makan siang');
+    assert.equal(afk.name, 'Putra');
+
+    removeAfk(userJid);
+    assert.equal(getAfk(userJid), undefined);
   });
 
   // 5. Web Server & REST API Tests

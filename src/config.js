@@ -21,6 +21,9 @@ const DEFAULT_CONFIG = {
     osint: true,
     ai: true,
     programming: true,
+    media: true,
+    downloader: true,
+    group: true,
   },
   aiProvider: 'hybrid', // 'hybrid' | 'groq' | 'gemini' | 'free'
   groqApiKey: process.env.GROQ_API_KEY || '',
