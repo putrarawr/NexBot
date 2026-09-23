@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bot-wa-dashboard
+    env: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ADMIN_PASSWORD
+        value: admin123
+      - key: BOT_NAME
+        value: NexBot
+      - key: PREFIX
+        value: .
+      - key: PORT
+        value: 3000
