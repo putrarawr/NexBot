@@ -32,7 +32,7 @@ async function bootstrap() {
 
   // 3. Jalankan Web Server Dashboard
   const app = createWebServer();
-  const PORT = process.env.PORT || 3000;
+  const PORT = process.env.PORT || (process.env.SPACE_ID ? 7860 : 3000);
   const server = http.createServer(app);
 
   server.listen(PORT, '0.0.0.0', () => {
