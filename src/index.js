@@ -16,7 +16,7 @@ import { registerMediaCommands } from './modules/media/index.js';
 import { registerDownloaderCommands } from './modules/downloader/index.js';
 import { registerGroupCommands } from './modules/group/index.js';
 import { registerTelegramExclusiveCommands } from './modules/telegram/index.js';
-import { registerOrcaCommands } from './modules/orca/index.js';
+import { registerUtilityTools } from './modules/tools/index.js';
 
 async function bootstrap() {
   console.clear?.();
@@ -38,7 +38,7 @@ async function bootstrap() {
   registerDownloaderCommands();
   registerGroupCommands();
   registerTelegramExclusiveCommands();
-  registerOrcaCommands();
+  registerUtilityTools();
   logger.info('Semua modul perintah (Game, OSINT, AI, Pemrograman, Media, Downloader, Grup) aktif.');
 
   // 3. Jalankan Web Server Dashboard

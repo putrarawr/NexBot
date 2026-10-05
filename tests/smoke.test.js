@@ -22,8 +22,8 @@ import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.
 import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, handleTelegramCallback, buildTelegramMainMenu, getTelegramBotState } from '../src/bot/telegram.js';
 import { registerTelegramExclusiveCommands } from '../src/modules/telegram/index.js';
 import { isCommandSupported } from '../src/bot/handler.js';
-import { getAgentMode, setAgentMode, orcaTools } from '../src/modules/orca/runner.js';
-import { registerOrcaCommands } from '../src/modules/orca/index.js';
+import { registerUtilityTools } from '../src/modules/tools/index.js';
+import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, playRpsRound } from '../src/modules/game/visual-games.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -129,7 +129,7 @@ async function runAllTests() {
     registerMediaCommands();
     registerDownloaderCommands();
     registerGroupCommands();
-    registerOrcaCommands();
+    registerUtilityTools();
 
     const expectedCommands = [
       'ping', 'clear', 'menu',
@@ -139,7 +139,7 @@ async function runAllTests() {
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
-      'orca', 'vibecode', 'fix', 'mode', 'sh', 'models',
+      'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc',
       'hidetag', 'afk',
     ];
 
@@ -439,28 +439,34 @@ async function runAllTests() {
     await tracker.finish('MUSIC READY');
   });
 
-  // 4f. Orca Cloud Dev Agent & VibeCode Mode Tests
-  console.log('\n🤖 4f. Orca Cloud Dev Agent & VibeCode Engine:');
-  await test('Orca agent modes switch between normal and vibecode', () => {
-    registerOrcaCommands();
-    assert.equal(getAgentMode(), 'normal');
-    setAgentMode('vibecode');
-    assert.equal(getAgentMode(), 'vibecode');
-    setAgentMode('normal');
-    assert.equal(getAgentMode(), 'normal');
+  // 4f. Visual Button-Based Games & Interactive Engine
+  console.log('\n🎮 4f. Visual Button Games (Tic-Tac-Toe 3x3 & RPS):');
+  await test('Visual Tic-Tac-Toe creates session, renders 3x3 grid, and checks winner', () => {
+    const session = createTicTacToeSession('chat_101', { id: 'user_1', name: 'Putra' });
+    assert.ok(session.id.startsWith('ttt_'));
+    assert.equal(session.board.length, 9);
+
+    const render = renderTicTacToeBoard(session);
+    assert.ok(render.text.includes('TIC-TAC-TOE 3x3'));
+    assert.equal(render.keyboard.inline_keyboard.length, 4, 'Should have 3x3 rows + 1 surrender row');
+
+    // Test win checking
+    const winningBoard = ['X', 'X', 'X', 'O', 'O', '', '', '', ''];
+    assert.equal(checkTicTacToeWinner(winningBoard), 'X');
+
+    const drawBoard = ['X', 'O', 'X', 'X', 'O', 'O', 'O', 'X', 'X'];
+    assert.equal(checkTicTacToeWinner(drawBoard), 'draw');
+
+    // Test bot AI move
+    const botMove = makeBotMove(['X', 'X', '', 'O', '', '', '', '', '']);
+    assert.equal(botMove, 2, 'Bot should block X at index 2');
   });
 
-  await test('Orca tools read files, list files, and search code safely', async () => {
-    const pkgJson = await orcaTools.readFile({ filePath: 'package.json' });
-    assert.ok(pkgJson.includes('bot-wa-dashboard'), 'Should read package.json');
-
-    const files = await orcaTools.listFiles({ dirPath: 'src' });
-    assert.ok(files.includes('index.js'), 'Should list src directory');
-
-    const hits = await orcaTools.searchCode({ pattern: 'registerOrcaCommands', dir: 'src' });
-    assert.ok(hits.includes('registerOrcaCommands'), 'Should find pattern in code');
+  await test('Visual Batu Gunting Kertas computes round outcome and scores', () => {
+    const winRound = playRpsRound('batu', 'Putra', '112233');
+    assert.ok(winRound.text.includes('BATU GUNTING KERTAS'));
+    assert.ok(winRound.keyboard.inline_keyboard.length > 0);
   });
-
   // 5. Web Server & REST API Tests
   console.log('\n🌐 5. Web Server REST API & Endpoints:');
   const app = createWebServer();

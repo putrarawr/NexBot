@@ -8,6 +8,7 @@ import { checkRateLimit, reactWait } from './antiBan.js';
 import { incrementCommandStat, addScore, getLeaderboard, activeGames } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import { tebakGambarList } from '../modules/game/questions.js';
+import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, visualSessions, buildRpsKeyboard, playRpsRound } from '../modules/game/visual-games.js';
 import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, cancelMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
 import {
   findSuggestions,
@@ -299,8 +300,13 @@ export function buildCategoryMenu(catName) {
 
   if (catName === 'game') {
     keyboard
-      .text('[ DADU (1-6) ]', 'dice_roll:dice')
-      .text('[ CASINO 777 ]', 'dice_roll:slots')
+      .text('[ 🎮 TIC-TAC-TOE 3x3 ]', 'visual_ttt_new')
+      .text('[ ✊ SUIT BATU GUNTING ]', 'quick_rps')
+      .row()
+      .text('[ 🎲 DADU (1-6) ]', 'dice_roll:dice')
+      .text('[ 🎰 CASINO 777 ]', 'dice_roll:slots')
+      .row()
+      .text('[ 💡 TEBAK GAMBAR ]', 'quick_tg')
       .row();
   } else if (catName === 'telegram') {
     keyboard
@@ -888,6 +894,75 @@ export async function handleTelegramCallback(_bot, ctx) {
       } catch {
         await ctx.reply(`${caption}\n\nTautan Gambar: ${item.image}`, { parse_mode: 'HTML' });
       }
+      return;
+    }
+
+    // 11. Visual Tic-Tac-Toe 3x3 Grid
+    if (data === 'visual_ttt_new') {
+      const session = createTicTacToeSession(chatId, { id: userId, name: pushName });
+      const boardRender = renderTicTacToeBoard(session);
+      await safeEditOrReply(ctx, boardRender.text, boardRender.keyboard);
+      return;
+    }
+
+    if (data.startsWith('ttt_click:')) {
+      const [, sessionId, rawIdx] = data.split(':');
+      const idx = parseInt(rawIdx, 10);
+      const session = visualSessions.get(sessionId);
+
+      if (session && !session.winner && !session.isDraw && session.board[idx] === '') {
+        session.board[idx] = 'X';
+        let win = checkTicTacToeWinner(session.board);
+
+        if (win === 'X') {
+          session.winner = 'X';
+          addScore(`tg:${userId}`, 50, pushName);
+        } else if (win === 'draw') {
+          session.isDraw = true;
+        } else {
+          session.turn = 'O';
+          const botIdx = makeBotMove(session.board);
+          if (botIdx !== null && botIdx !== undefined) {
+            session.board[botIdx] = 'O';
+            const botWin = checkTicTacToeWinner(session.board);
+            if (botWin === 'O') {
+              session.winner = 'O';
+            } else if (botWin === 'draw') {
+              session.isDraw = true;
+            }
+          }
+          session.turn = 'X';
+        }
+
+        const boardRender = renderTicTacToeBoard(session);
+        await safeEditOrReply(ctx, boardRender.text, boardRender.keyboard);
+      }
+      return;
+    }
+
+    if (data.startsWith('ttt_forfeit:')) {
+      const [, sessionId] = data.split(':');
+      const session = visualSessions.get(sessionId);
+      if (session) {
+        session.winner = 'O';
+        const boardRender = renderTicTacToeBoard(session);
+        await safeEditOrReply(ctx, boardRender.text, boardRender.keyboard);
+      }
+      return;
+    }
+
+    // 12. Visual Batu Gunting Kertas (RPS)
+    if (data === 'quick_rps') {
+      const text = `<b>[ BATU GUNTING KERTAS INTERAKTIF ]</b>\n\nPilih salah satu jurus di bawah ini untuk melawan bot:`;
+      const keyboard = buildRpsKeyboard();
+      await safeEditOrReply(ctx, text, keyboard);
+      return;
+    }
+
+    if (data.startsWith('rps_play:')) {
+      const choice = data.replace('rps_play:', '');
+      const round = playRpsRound(choice, pushName, userId);
+      await safeEditOrReply(ctx, round.text, round.keyboard);
       return;
     }
   } catch (err) {
