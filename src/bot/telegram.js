@@ -65,7 +65,15 @@ export function escapeHtml(str) {
 export function formatTelegramHtml(text) {
   if (!text || typeof text !== 'string') return '';
 
-  let escaped = text
+  const allowedTags = /<\/?(b|strong|i|em|u|ins|s|strike|del|code|pre|a)(\s+[^>]*)?>/gi;
+  const tokens = [];
+  const protectedText = text.replace(allowedTags, (match) => {
+    const placeholder = `__HTML_TAG_${tokens.length}__`;
+    tokens.push(match);
+    return placeholder;
+  });
+
+  let escaped = protectedText
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -75,6 +83,10 @@ export function formatTelegramHtml(text) {
   escaped = escaped.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '<b>$1</b>');
   escaped = escaped.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '<i>$1</i>');
   escaped = escaped.replace(/(?<!\w)~([^~\n]+)~(?!\w)/g, '<s>$1</s>');
+
+  for (let i = 0; i < tokens.length; i++) {
+    escaped = escaped.replace(`__HTML_TAG_${i}__`, tokens[i]);
+  }
 
   return escaped;
 }
