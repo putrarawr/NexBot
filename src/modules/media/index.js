@@ -117,11 +117,12 @@ export function registerMediaCommands() {
     category: 'media',
     description: 'Membuat stiker gelembung quote chat estetik ala Telegram',
     usage: '.qc <teks> atau balas pesan orang lain dengan .qc',
-    async execute({ sock, msg, jid, pushName, sender, fullText, reply, prefix }) {
+    async execute({ sock, msg, jid, pushName, sender, fullText, reply, prefix, ctx }) {
       let textToQuote = fullText?.trim();
       let authorName = pushName || 'User';
       const senderNum = sender.replace(/[^0-9]/g, '');
 
+      // 1. WhatsApp Quoted Message Context
       const quoted = msg.message?.extendedTextMessage?.contextInfo;
       if (!textToQuote && quoted?.quotedMessage) {
         const qMsg = quoted.quotedMessage;
@@ -129,6 +130,13 @@ export function registerMediaCommands() {
         authorName = quoted.participant ? quoted.participant.replace(/[^0-9]/g, '') : authorName;
       }
 
+      // 2. Telegram Replied Message Context
+      const tgReply = ctx?.message?.reply_to_message;
+      if (!textToQuote && tgReply) {
+        textToQuote = tgReply.text || tgReply.caption || '';
+        const tgName = [tgReply.from?.first_name, tgReply.from?.last_name].filter(Boolean).join(' ') || tgReply.from?.username || 'User';
+        authorName = tgName;
+      }
       if (!textToQuote) {
         return reply(`[!] Masukkan teks untuk quote.\nContoh: \`${prefix}qc Kata-kata hari ini\`\natau balas pesan orang lain dengan \`${prefix}qc\`.`);
       }

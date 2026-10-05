@@ -103,52 +103,87 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   const cleanName = String(name)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
   const initial = cleanName.charAt(0).toUpperCase() || 'U';
   const timeStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
-  const words = cleanText.split(' ');
+  const words = cleanText.split(/\s+/);
   const lines = [];
   let currentLine = '';
 
   for (const word of words) {
-    if ((currentLine + ' ' + word).trim().length > 28) {
+    if ((currentLine + ' ' + word).trim().length > 30) {
       lines.push(currentLine.trim());
       currentLine = word;
     } else {
-      currentLine += ' ' + word;
+      currentLine += (currentLine ? ' ' : '') + word;
     }
   }
   if (currentLine.trim()) lines.push(currentLine.trim());
-
   const displayedLines = lines.slice(0, 5);
+
   const textTspans = displayedLines
-    .map((line, i) => `<tspan x="65" y="${220 + i * 28}">${line}</tspan>`)
+    .map((line, i) => `<tspan x="62" y="${205 + i * 26}">${line}</tspan>`)
     .join('');
 
+  // Authentic iOS Message Bubble (Hold/Context Menu Style)
   const svg = `
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="cardBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1e1e2e"/>
-      <stop offset="100%" stop-color="#11111b"/>
+    <linearGradient id="bubbleBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1C1C1E"/>
+      <stop offset="100%" stop-color="#242426"/>
+    </linearGradient>
+    <linearGradient id="reactionBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2C2C2E"/>
+      <stop offset="100%" stop-color="#3A3A3C"/>
     </linearGradient>
     <linearGradient id="avatarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#6366f1"/>
+      <stop offset="0%" stop-color="#0A84FF"/>
+      <stop offset="100%" stop-color="#5E5CE6"/>
     </linearGradient>
   </defs>
 
-  <rect x="25" y="75" width="462" height="360" rx="28" fill="url(#cardBg)" stroke="#313244" stroke-width="2"/>
-  <circle cx="95" cy="145" r="32" fill="url(#avatarGrad)"/>
-  <text x="95" y="156" font-family="system-ui, sans-serif" font-size="26" font-weight="bold" fill="#ffffff" text-anchor="middle">${initial}</text>
-  <text x="145" y="142" font-family="system-ui, sans-serif" font-size="20" font-weight="bold" fill="#cdd6f4">${cleanName}</text>
-  <text x="145" y="165" font-family="system-ui, sans-serif" font-size="13" fill="#a6adc8">${senderNumber || 'User'}</text>
-  <text font-family="system-ui, sans-serif" font-size="20" font-weight="500" fill="#f5e0dc">
+  <!-- 1. iOS Reaction Bar Pill (Hold Action Reaction) -->
+  <rect x="76" y="24" width="360" height="48" rx="24" fill="url(#reactionBg)" stroke="#48484A" stroke-width="1.5"/>
+  <text x="114" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">❤️</text>
+  <text x="168" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">👍</text>
+  <text x="222" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">👎</text>
+  <text x="276" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">😂</text>
+  <text x="330" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">‼️</text>
+  <text x="384" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">❓</text>
+
+  <!-- 2. Main iOS Chat Bubble (Held State) -->
+  <rect x="30" y="86" width="452" height="342" rx="26" fill="url(#bubbleBg)" stroke="#38383A" stroke-width="2"/>
+
+  <!-- Avatar Header -->
+  <circle cx="75" cy="134" r="26" fill="url(#avatarGrad)"/>
+  <text x="75" y="143" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" fill="#FFFFFF" text-anchor="middle">${initial}</text>
+
+  <!-- Sender Name & Subtitle -->
+  <text x="115" y="130" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">${cleanName}</text>
+  <text x="115" y="149" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="500" fill="#8E8E93">iMessage • ${senderNumber || 'Verified'}</text>
+
+  <!-- Divider line -->
+  <line x1="62" y1="172" x2="450" y2="172" stroke="#2C2C2E" stroke-width="1.2"/>
+
+  <!-- Message Body Text -->
+  <text font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="19" font-weight="400" fill="#F2F2F7" letter-spacing="-0.3">
     ${textTspans}
   </text>
-  <text x="445" y="405" font-family="system-ui, sans-serif" font-size="13" fill="#6c7086" text-anchor="end">${timeStr}</text>
+
+  <!-- Status & Timestamp -->
+  <text x="450" y="405" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#8E8E93" text-anchor="end">Terkirim • ${timeStr}</text>
+
+  <!-- 3. iOS Bottom Context Menu Strip -->
+  <rect x="86" y="442" width="340" height="42" rx="14" fill="#242426" stroke="#38383A" stroke-width="1.2"/>
+  <text x="142" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Balas</text>
+  <text x="198" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
+  <text x="256" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Salin</text>
+  <text x="314" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
+  <text x="370" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Teruskan</text>
 </svg>
 `;
 

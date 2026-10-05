@@ -17,18 +17,18 @@ export function registerTelegramExclusiveCommands() {
       }
 
       const keyboard = new InlineKeyboard()
-        .text('🎲 Dadu (1-6)', 'dice_roll:dice')
-        .text('🎯 Panahan / Dart', 'dice_roll:dart')
+        .text('[•] Dadu (1-6)', 'dice_roll:dice')
+        .text('[•] Dart Panahan', 'dice_roll:dart')
         .row()
-        .text('🏀 Bola Basket', 'dice_roll:basketball')
-        .text('⚽ Sepak Bola', 'dice_roll:football')
+        .text('[•] Bola Basket', 'dice_roll:basketball')
+        .text('[•] Sepak Bola', 'dice_roll:football')
         .row()
-        .text('🎰 Mesin Slot Casino', 'dice_roll:slots')
-        .text('🎳 Bowling', 'dice_roll:bowling');
+        .text('[•] Slot Casino 777', 'dice_roll:slots')
+        .text('[•] Bowling', 'dice_roll:bowling');
 
-      let text = `🎮 <b>TELEGRAM INTERACTIVE GAMES</b>\n\n`;
-      text += `Pilih salah satu game animasi di bawah ini untuk menguji keberuntunganmu!\n`;
-      text += `Hadiah poin akan otomatis masuk ke leaderboard jika mendapatkan skor tinggi.`;
+      let text = `[GAME & CASINO INTERAKTIF]\n\n`;
+      text += `Pilih salah satu game animasi di bawah ini untuk menguji keberuntungan.\n`;
+      text += `Hadiah poin otomatis masuk ke leaderboard jika mendapatkan skor tinggi.`;
 
       await ctx.reply(text, {
         parse_mode: 'HTML',
@@ -53,23 +53,23 @@ export function registerTelegramExclusiveCommands() {
       const user = ctx.from;
       const chat = ctx.chat;
 
-      let out = `👤 <b>INFORMASI AKUN TELEGRAM</b>\n\n`;
-      out += `• <b>User ID:</b> <code>${user.id}</code>\n`;
-      out += `• <b>Nama:</b> ${user.first_name || ''} ${user.last_name || ''}\n`;
-      out += `• <b>Username:</b> ${user.username ? '@' + user.username : '<i>(Tidak ada)</i>'}\n`;
-      out += `• <b>Telegram Premium:</b> ${user.is_premium ? '🌟 Ya' : 'Tidak'}\n`;
-      out += `• <b>Kode Bahasa:</b> <code>${user.language_code || 'id'}</code>\n\n`;
+      let out = `[INFORMASI AKUN TELEGRAM]\n\n`;
+      out += `• User ID: <code>${user.id}</code>\n`;
+      out += `• Nama: ${user.first_name || ''} ${user.last_name || ''}\n`;
+      out += `• Username: ${user.username ? '@' + user.username : '(Tidak ada)'}\n`;
+      out += `• Telegram Premium: ${user.is_premium ? 'Ya' : 'Tidak'}\n`;
+      out += `• Kode Bahasa: <code>${user.language_code || 'id'}</code>\n\n`;
 
-      out += `📍 <b>INFORMASI CHAT</b>\n`;
-      out += `• <b>Chat ID:</b> <code>${chat.id}</code>\n`;
-      out += `• <b>Tipe Chat:</b> <code>${chat.type}</code>\n`;
+      out += `[INFORMASI CHAT]\n`;
+      out += `• Chat ID: <code>${chat.id}</code>\n`;
+      out += `• Tipe Chat: ${chat.type}\n`;
       if (chat.title) {
-        out += `• <b>Judul Grup:</b> ${chat.title}\n`;
+        out += `• Judul Grup: ${chat.title}\n`;
       }
 
       const keyboard = new InlineKeyboard()
-        .text('🎮 Main Game', 'menu_cat:game')
-        .text('📜 Menu Lengkap', 'menu_main');
+        .text('[ GAME ]', 'menu_cat:game')
+        .text('[ MENU UTAMA ]', 'menu_main');
 
       await ctx.reply(out, {
         parse_mode: 'HTML',
@@ -93,26 +93,26 @@ export function registerTelegramExclusiveCommands() {
 
       const chat = ctx.chat;
       if (chat.type === 'private') {
-        return reply('ℹ️ Perintah ini khusus untuk grup atau channel Telegram.');
+        return reply('[!] Perintah ini khusus untuk grup atau channel Telegram.');
       }
 
       try {
         const memberCount = await ctx.api.getChatMemberCount(chat.id).catch(() => 'Tidak dapat diakses');
         const administrators = await ctx.api.getChatAdministrators(chat.id).catch(() => []);
 
-        let out = `👥 <b>INFORMASI GRUP TELEGRAM</b>\n\n`;
-        out += `• <b>Nama Grup:</b> ${chat.title}\n`;
-        out += `• <b>ID Grup:</b> <code>${chat.id}</code>\n`;
-        out += `• <b>Tipe:</b> <code>${chat.type}</code>\n`;
-        out += `• <b>Jumlah Anggota:</b> <b>${memberCount}</b> orang\n`;
-        out += `• <b>Jumlah Admin:</b> <b>${administrators.length}</b> admin\n\n`;
+        let out = `[INFORMASI GRUP TELEGRAM]\n\n`;
+        out += `• Nama Grup: ${chat.title}\n`;
+        out += `• ID Grup: <code>${chat.id}</code>\n`;
+        out += `• Tipe: ${chat.type}\n`;
+        out += `• Jumlah Anggota: ${memberCount} orang\n`;
+        out += `• Jumlah Admin: ${administrators.length} admin\n\n`;
 
         if (administrators.length > 0) {
-          out += `👑 <b>Daftar Admin:</b>\n`;
+          out += `[DAFTAR ADMINISTRATOR]\n`;
           for (const adm of administrators.slice(0, 10)) {
             const name = adm.user.first_name || adm.user.username || 'Admin';
-            const role = adm.status === 'creator' ? '⭐ Pemilik' : '🛡️ Admin';
-            out += `- ${name} (${role})\n`;
+            const role = adm.status === 'creator' ? '[Pemilik]' : '[Admin]';
+            out += `- ${name} ${role}\n`;
           }
         }
 
@@ -138,16 +138,16 @@ export function registerTelegramExclusiveCommands() {
       }
 
       const keyboard = new InlineKeyboard()
-        .text('💡 Tanya AI', 'quick_ai')
-        .text('🎮 Tebak Gambar', 'quick_tg')
+        .text('[ TANYA AI ]', 'quick_ai')
+        .text('[ TEBAK GAMBAR ]', 'quick_tg')
         .row()
-        .text('🎲 Dadu Berhadiah', 'dice_roll:dice')
-        .text('🏆 Leaderboard', 'menu_cat:game')
+        .text('[ DADU HADIAH ]', 'dice_roll:dice')
+        .text('[ LEADERBOARD ]', 'quick_leaderboard')
         .row()
-        .text('🔍 Cek IP Saya', 'quick_ip')
-        .text('📜 Menu Utama', 'menu_main');
+        .text('[ CEK IP SAYA ]', 'quick_ip')
+        .text('[ MENU UTAMA ]', 'menu_main');
 
-      await ctx.reply('⚡ <b>PINTASAN CEPAT INTERAKTIF</b>\n\nPilih aksi instan di bawah ini dengan menekan tombol:', {
+      await ctx.reply('[PINTASAN CEPAT INTERAKTIF]\n\nPilih aksi instan di bawah ini dengan menekan tombol:', {
         parse_mode: 'HTML',
         reply_markup: keyboard,
       });

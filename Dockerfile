@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Install system packages including ffmpeg for media conversion
-RUN apk add --no-cache ffmpeg
+# Install system packages including ffmpeg and yt-dlp for media conversion & downloads
+RUN apk add --no-cache ffmpeg yt-dlp
 
 # Set working directory
 WORKDIR /app

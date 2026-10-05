@@ -134,7 +134,7 @@ async function runAllTests() {
       'ai', 'explain', 'summarize', 'translate',
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive',
-      'tiktok',
+      'tiktok', 'instagram', 'youtube', 'ytmp3', 'twitter', 'facebook', 'pinterest', 'down',
       'hidetag', 'afk',
     ];
 
@@ -412,7 +412,7 @@ async function runAllTests() {
     mockCtx.callbackQuery.data = 'dice_roll:dice';
     await handleTelegramCallback(null, mockCtx);
     assert.equal(sentTexts.length, 2);
-    assert.ok(sentTexts[1].text.includes('ANGKA TERTINGGI 6'), 'Should calculate score for dice roll 6');
+    assert.ok(sentTexts[1].text.includes('ANGKA MAKSIMAL 6'), 'Should calculate score for dice roll 6');
   });
 
   // 5. Web Server & REST API Tests

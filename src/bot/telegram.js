@@ -1,10 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../config.js';
 import { commands, aliases, isCommandSupported, getCommandsByCategory } from './handler.js';
 import { checkRateLimit } from './antiBan.js';
-import { incrementCommandStat, addScore, getLeaderboard } from '../utils/database.js';
+import { incrementCommandStat, addScore, getLeaderboard, activeGames } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
+import { tebakGambarList } from '../modules/game/questions.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -18,6 +21,8 @@ let botInstance = null;
 let botStatus = 'disconnected'; // 'disconnected' | 'connecting' | 'connected' | 'error'
 let botInfo = null;
 let connectStartTime = null;
+
+const BANNER_PATH = path.resolve(process.cwd(), 'jpeg');
 
 export function getTelegramBot() {
   return botInstance;
@@ -152,52 +157,85 @@ export function createTelegramSocketAdapter(bot, ctx, targetChatId) {
 }
 
 /**
- * Generator Menu Utama Telegram dengan Inline Keyboard Interaktif
+ * Helper Edit Pesan Aman (Menangani Pesan Berupa Foto Maupun Teks Biasa)
+ */
+export async function safeEditOrReply(ctx, text, keyboard) {
+  const hasPhoto = Boolean(ctx.callbackQuery?.message?.photo);
+  try {
+    if (hasPhoto) {
+      return await ctx.editMessageCaption({
+        caption: text,
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    } else {
+      return await ctx.editMessageText(text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('not modified')) {
+      return null;
+    }
+    try {
+      return await ctx.reply(text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Generator Menu Utama Telegram (Clean Text Icons - Tanpa Emoji)
  */
 export function buildTelegramMainMenu(pushName) {
   const keyboard = new InlineKeyboard()
-    .text('🎮 Game & Kuis', 'menu_cat:game')
-    .text('🤖 AI & ChatGPT', 'menu_cat:ai')
+    .text('[ GAME & KUIS ]', 'menu_cat:game')
+    .text('[ AI & CHATGPT ]', 'menu_cat:ai')
     .row()
-    .text('🔍 OSINT & Network', 'menu_cat:osint')
-    .text('💻 Pemrograman', 'menu_cat:programming')
+    .text('[ OSINT & NET ]', 'menu_cat:osint')
+    .text('[ PEMROGRAMAN ]', 'menu_cat:programming')
     .row()
-    .text('📥 Downloader Media', 'menu_cat:downloader')
-    .text('✨ Eksklusif Telegram', 'menu_cat:telegram')
+    .text('[ DOWNLOADER ]', 'menu_cat:downloader')
+    .text('[ EKSKLUSIF TELE ]', 'menu_cat:telegram')
     .row()
-    .text('🎲 Game Dadu & Slot', 'menu_cat:dice_picker')
-    .text('📋 Semua Perintah', 'menu_all')
+    .text('[ DADU & CASINO ]', 'menu_cat:dice_picker')
+    .text('[ SEMUA PERINTAH ]', 'menu_all')
     .row()
-    .text('⚡ Pintasan Cepat', 'quick_buttons')
-    .text('👤 Profil Saya', 'quick_whoami');
+    .text('[ PINTASAN CEPAT ]', 'quick_buttons')
+    .text('[ PROFIL SAYA ]', 'quick_whoami');
 
-  let text = `🚀 <b>NEXBOT TELEGRAM DASHBOARD</b>\n\n`;
-  text += `Halo <b>${pushName}</b>! Selamat datang di bot multi-fungsi NexBot.\n`;
-  text += `Gunakan tombol interaktif di bawah ini untuk menjelajahi seluruh fitur cerdas kami:`;
+  let text = `<b>[ NEXBOT TELEGRAM DASHBOARD ]</b>\n\n`;
+  text += `Halo <b>${pushName}</b>. Selamat datang di NexBot Multi-Platform.\n`;
+  text += `Silakan tekan tombol di bawah ini untuk melihat daftar fitur yang tersedia:`;
 
   return { text, keyboard };
 }
 
 /**
- * Generator Menu Kategori Telegram
+ * Generator Menu Kategori Telegram (Clean Text Icons)
  */
 export function buildCategoryMenu(catName) {
   const categories = getCommandsByCategory('telegram');
   const list = categories[catName] || [];
 
   const catHeaders = {
-    game: '🎮 GAME & KUIS INTERAKTIF',
-    ai: '🤖 ARTIFICIAL INTELLIGENCE (AI)',
-    osint: '🔍 OSINT & CYBER SECURITY',
-    programming: '💻 PEMROGRAMAN & TOOLS',
-    downloader: '📥 MEDIA & SOCIAL DOWNLOADER',
-    telegram: '✨ FITUR EKSKLUSIF TELEGRAM',
-    group: '👥 MANAJEMEN GRUP',
-    general: '⚙️ UTILITY & UMUM',
+    game: 'GAME & KUIS INTERAKTIF',
+    ai: 'ARTIFICIAL INTELLIGENCE (AI)',
+    osint: 'OSINT & NETWORK TOOLS',
+    programming: 'PEMROGRAMAN & DEV TOOLS',
+    downloader: 'MEDIA & SOSMED DOWNLOADER',
+    telegram: 'FITUR EKSKLUSIF TELEGRAM',
+    group: 'MANAJEMEN GRUP',
+    general: 'UTILITY & UMUM',
   };
 
   const header = catHeaders[catName] || catName.toUpperCase();
-  let text = `📂 <b>${header}</b>\n\n`;
+  let text = `<b>[ ${header} ]</b>\n\n`;
 
   if (list.length === 0) {
     text += `<i>Belum ada perintah yang terdaftar di kategori ini.</i>\n`;
@@ -214,23 +252,23 @@ export function buildCategoryMenu(catName) {
 
   if (catName === 'game') {
     keyboard
-      .text('🎲 Main Dadu', 'dice_roll:dice')
-      .text('🎰 Main Slot', 'dice_roll:slots')
+      .text('[ DADU (1-6) ]', 'dice_roll:dice')
+      .text('[ CASINO 777 ]', 'dice_roll:slots')
       .row();
   } else if (catName === 'telegram') {
     keyboard
-      .text('👤 Profil ID Saya', 'quick_whoami')
-      .text('🎲 Pilihan Game', 'menu_cat:dice_picker')
+      .text('[ PROFIL ID ]', 'quick_whoami')
+      .text('[ GAME DADU ]', 'menu_cat:dice_picker')
       .row();
   } else if (catName === 'ai') {
     keyboard
-      .text('💡 Tanya AI Sekarang', 'quick_ai')
+      .text('[ CARA PAKAI AI ]', 'quick_ai')
       .row();
   }
 
   keyboard
-    .text('⬅️ Menu Utama', 'menu_main')
-    .text('🔄 Refresh', `menu_cat:${catName}`);
+    .text('[ « KEMBALI ]', 'menu_main')
+    .text('[ ⟳ REFRESH ]', `menu_cat:${catName}`);
 
   return { text, keyboard };
 }
@@ -240,22 +278,44 @@ export function buildCategoryMenu(catName) {
  */
 export function buildDicePicker() {
   const keyboard = new InlineKeyboard()
-    .text('🎲 Dadu (1-6)', 'dice_roll:dice')
-    .text('🎯 Dart Panahan', 'dice_roll:dart')
+    .text('[•] Dadu (1-6)', 'dice_roll:dice')
+    .text('[•] Dart Panahan', 'dice_roll:dart')
     .row()
-    .text('🏀 Bola Basket', 'dice_roll:basketball')
-    .text('⚽ Sepak Bola', 'dice_roll:football')
+    .text('[•] Bola Basket', 'dice_roll:basketball')
+    .text('[•] Sepak Bola', 'dice_roll:football')
     .row()
-    .text('🎰 Slot Casino 777', 'dice_roll:slots')
-    .text('🎳 Bowling', 'dice_roll:bowling')
+    .text('[•] Slot Casino 777', 'dice_roll:slots')
+    .text('[•] Bowling', 'dice_roll:bowling')
     .row()
-    .text('⬅️ Menu Utama', 'menu_main');
+    .text('[ « KEMBALI ]', 'menu_main');
 
-  let text = `🎲 <b>TELEGRAM ANIMATED GAMES & CASINO</b>\n\n`;
-  text += `Pilih salah satu game animasi di bawah ini!\n`;
-  text += `Telegram akan memutar dadu/slot secara nyata dan poin hadiah otomatis dihitung ke leaderboard:`;
+  let text = `<b>[ GAME DADU & CASINO TELEGRAM ]</b>\n\n`;
+  text += `Pilih game di bawah ini untuk memulai lemparan.\n`;
+  text += `Telegram akan memutar animasi nyata dan poin kemenangan akan otomatis dicatat ke leaderboard:`;
 
   return { text, keyboard };
+}
+
+/**
+ * Mengirim Menu Utama dengan Banner JPEG jika Tersedia
+ */
+export async function sendTelegramMenuWithBanner(ctx, menu) {
+  if (fs.existsSync(BANNER_PATH)) {
+    try {
+      return await ctx.replyWithPhoto(new InputFile(BANNER_PATH), {
+        caption: menu.text,
+        parse_mode: 'HTML',
+        reply_markup: menu.keyboard,
+      });
+    } catch (err) {
+      logger.warn('[Telegram] Gagal mengirim banner jpeg, fallback teks:', err.message);
+    }
+  }
+
+  return await ctx.reply(menu.text, {
+    parse_mode: 'HTML',
+    reply_markup: menu.keyboard,
+  });
 }
 
 /**
@@ -275,7 +335,6 @@ export async function handleTelegramMessage(bot, ctx) {
     const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
     const config = getConfig();
 
-    // Helper kirim pesan balasan
     const reply = async (content) => {
       try {
         const textPayload = typeof content === 'string' ? content : content?.text || '';
@@ -358,7 +417,6 @@ export async function handleTelegramMessage(bot, ctx) {
     const [rawCmd, ...args] = withoutPrefix.split(/\s+/);
     if (!rawCmd) return;
 
-    // Bersihkan mention bot pada Telegram group (misal /menu@NexBot -> menu)
     let cleanCmd = rawCmd.toLowerCase();
     if (cleanCmd.includes('@')) {
       const [baseCmd, botMention] = cleanCmd.split('@');
@@ -367,13 +425,10 @@ export async function handleTelegramMessage(bot, ctx) {
       }
     }
 
-    // INTERAKTIF MENU TELEGRAM: Tampilkan dashboard tombol jika /menu atau /start dipanggil
+    // INTERAKTIF MENU TELEGRAM: Tampilkan menu + banner jika /menu atau /start dipanggil
     if (cleanCmd === 'menu' || cleanCmd === 'start' || cleanCmd === 'help') {
       const menu = buildTelegramMainMenu(pushName);
-      await ctx.reply(menu.text, {
-        parse_mode: 'HTML',
-        reply_markup: menu.keyboard,
-      });
+      await sendTelegramMenuWithBanner(ctx, menu);
       return;
     }
 
@@ -452,16 +507,12 @@ export async function handleTelegramCallback(_bot, ctx) {
     const user = ctx.from;
     const pushName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || 'TelegramUser';
     const userId = String(user?.id || 'unknown');
+    const chatId = String(ctx.chat?.id || userId);
 
     // 1. Menu Utama
     if (data === 'menu_main') {
       const menu = buildTelegramMainMenu(pushName);
-      await ctx.editMessageText(menu.text, {
-        parse_mode: 'HTML',
-        reply_markup: menu.keyboard,
-      }).catch(async () => {
-        await ctx.reply(menu.text, { parse_mode: 'HTML', reply_markup: menu.keyboard });
-      });
+      await safeEditOrReply(ctx, menu.text, menu.keyboard);
       return;
     }
 
@@ -470,29 +521,19 @@ export async function handleTelegramCallback(_bot, ctx) {
       const cat = data.replace('menu_cat:', '');
       if (cat === 'dice_picker') {
         const picker = buildDicePicker();
-        await ctx.editMessageText(picker.text, {
-          parse_mode: 'HTML',
-          reply_markup: picker.keyboard,
-        }).catch(async () => {
-          await ctx.reply(picker.text, { parse_mode: 'HTML', reply_markup: picker.keyboard });
-        });
+        await safeEditOrReply(ctx, picker.text, picker.keyboard);
         return;
       }
 
       const catMenu = buildCategoryMenu(cat);
-      await ctx.editMessageText(catMenu.text, {
-        parse_mode: 'HTML',
-        reply_markup: catMenu.keyboard,
-      }).catch(async () => {
-        await ctx.reply(catMenu.text, { parse_mode: 'HTML', reply_markup: catMenu.keyboard });
-      });
+      await safeEditOrReply(ctx, catMenu.text, catMenu.keyboard);
       return;
     }
 
     // 3. Semua Perintah
     if (data === 'menu_all') {
       const categories = getCommandsByCategory('telegram');
-      let text = `📋 <b>SELURUH DAFTAR PERINTAH BOT TELEGRAM</b>\n\n`;
+      let text = `<b>[ SELURUH DAFTAR PERINTAH BOT TELEGRAM ]</b>\n\n`;
 
       for (const [cat, list] of Object.entries(categories)) {
         text += `<b>[ ${cat.toUpperCase()} ]</b>\n`;
@@ -502,13 +543,8 @@ export async function handleTelegramCallback(_bot, ctx) {
         text += `\n`;
       }
 
-      const keyboard = new InlineKeyboard().text('⬅️ Kembali ke Menu Utama', 'menu_main');
-      await ctx.editMessageText(text, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
-      }).catch(async () => {
-        await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard });
-      });
+      const keyboard = new InlineKeyboard().text('[ « KEMBALI ]', 'menu_main');
+      await safeEditOrReply(ctx, text, keyboard);
       return;
     }
 
@@ -534,10 +570,10 @@ export async function handleTelegramCallback(_bot, ctx) {
       if (diceType === 'slots') {
         if (val === 64) {
           reward = 350;
-          label = `🎰 <b>JACKPOT 777! LUAR BIASA!</b> 🎉`;
+          label = `[ JACKPOT 777! SEMPURNA! ]`;
         } else if ([1, 22, 43].includes(val)) {
           reward = 120;
-          label = `💎 <b>TIGA GAMBAR SAMA! MENANG BESAR!</b> ✨`;
+          label = `[ TIGA GAMBAR SERUPA! MENANG BESAR ]`;
         } else {
           reward = 15;
           label = `Belum jackpot, coba lagi! Skor mesin: ${val}`;
@@ -545,7 +581,7 @@ export async function handleTelegramCallback(_bot, ctx) {
       } else if (diceType === 'dart') {
         if (val === 6) {
           reward = 100;
-          label = `🎯 <b>BULLSEYE TEPAT DI LINGKARAN TENGAH!</b> 🔥`;
+          label = `[ BULLSEYE TEPAT DI LINGKARAN TENGAH ]`;
         } else {
           reward = val * 10;
           label = `Skor sasaran: <b>${val}</b>`;
@@ -553,23 +589,23 @@ export async function handleTelegramCallback(_bot, ctx) {
       } else if (diceType === 'basketball') {
         if (val >= 4) {
           reward = 60;
-          label = `🏀 <b>SWISH! BOLA MASUK KERANJANG!</b> 🌟`;
+          label = `[ TEMBAKAN MASUK RING (SWISH) ]`;
         } else {
           reward = 10;
-          label = `Sayang sekali meleset, coba lagi!`;
+          label = `Meleset tipis, lempar lagi!`;
         }
       } else if (diceType === 'football') {
         if ([3, 4, 5].includes(val)) {
           reward = 60;
-          label = `⚽ <b>GOOOOL! TEMBAKAN AKURAT!</b> 🥅`;
+          label = `[ GOOOL! TEMBAKAN AKURAT ]`;
         } else {
           reward = 10;
-          label = `Ditepis kiper / membentur tiang!`;
+          label = `Membentur tiang gawang!`;
         }
       } else if (diceType === 'bowling') {
         if (val === 6) {
           reward = 90;
-          label = `🎳 <b>STRIKE! SEMUA PIN JATUH!</b> 💥`;
+          label = `[ STRIKE! SEMUA PIN JATUH ]`;
         } else {
           reward = val * 10;
           label = `Pin yang berhasil dijatuhkan: <b>${val}</b>`;
@@ -577,7 +613,7 @@ export async function handleTelegramCallback(_bot, ctx) {
       } else {
         if (val === 6) {
           reward = 60;
-          label = `🎲 <b>ANGKA TERTINGGI 6! MANTAP!</b> 🌟`;
+          label = `[ ANGKA MAKSIMAL 6! ]`;
         } else {
           reward = val * 8;
           label = `Mata dadu: <b>${val}</b>`;
@@ -586,17 +622,17 @@ export async function handleTelegramCallback(_bot, ctx) {
 
       const totalPoin = addScore(`tg:${userId}`, reward, pushName);
 
-      let resultText = `${label}\n\n`;
-      resultText += `👤 Pemain: <b>${pushName}</b>\n`;
-      resultText += `🎁 Hadiah: <b>+${reward} Poin</b>\n`;
-      resultText += `💰 Total Poin Kamu: <b>${totalPoin} Poin</b>`;
+      let resultText = `<b>${label}</b>\n\n`;
+      resultText += `• Pemain: <b>${pushName}</b>\n`;
+      resultText += `• Hadiah: <b>+${reward} Poin</b>\n`;
+      resultText += `• Total Poin: <b>${totalPoin} Poin</b>`;
 
       const replayKeyboard = new InlineKeyboard()
-        .text(`🔄 Lempar Lagi (${emoji})`, `dice_roll:${diceType}`)
-        .text('🎲 Game Lain', 'menu_cat:dice_picker')
+        .text(`[ ⟳ LEMPAR LAGI ]`, `dice_roll:${diceType}`)
+        .text('[ DADU LAIN ]', 'menu_cat:dice_picker')
         .row()
-        .text('🏆 Leaderboard', 'quick_leaderboard')
-        .text('⬅️ Menu Utama', 'menu_main');
+        .text('[ LEADERBOARD ]', 'quick_leaderboard')
+        .text('[ « KEMBALI ]', 'menu_main');
 
       await ctx.reply(resultText, {
         parse_mode: 'HTML',
@@ -607,73 +643,129 @@ export async function handleTelegramCallback(_bot, ctx) {
 
     // 5. Quick Whoami
     if (data === 'quick_whoami') {
-      let out = `👤 <b>PROFIL TELEGRAM ANDA</b>\n\n`;
-      out += `• <b>User ID:</b> <code>${user?.id}</code>\n`;
-      out += `• <b>Nama:</b> ${user?.first_name || ''} ${user?.last_name || ''}\n`;
-      out += `• <b>Username:</b> ${user?.username ? '@' + user.username : '<i>(Belum ada)</i>'}\n`;
-      out += `• <b>Status Premium:</b> ${user?.is_premium ? '🌟 Premium' : 'Biasa'}\n`;
+      let out = `<b>[ PROFIL TELEGRAM ANDA ]</b>\n\n`;
+      out += `• User ID: <code>${user?.id}</code>\n`;
+      out += `• Nama: ${user?.first_name || ''} ${user?.last_name || ''}\n`;
+      out += `• Username: ${user?.username ? '@' + user.username : '(Belum ada)'}\n`;
+      out += `• Status Premium: ${user?.is_premium ? 'Premium' : 'Reguler'}\n`;
 
       const keyboard = new InlineKeyboard()
-        .text('🏆 Cek Skor', 'quick_leaderboard')
-        .text('⬅️ Menu Utama', 'menu_main');
+        .text('[ CEK SKOR ]', 'quick_leaderboard')
+        .text('[ « KEMBALI ]', 'menu_main');
 
-      await ctx.reply(out, { parse_mode: 'HTML', reply_markup: keyboard });
+      await safeEditOrReply(ctx, out, keyboard);
       return;
     }
 
     // 6. Quick Leaderboard
     if (data === 'quick_leaderboard') {
       const top = getLeaderboard(5);
-      let out = `🏆 <b>LEADERBOARD TOP 5 SKOR</b>\n\n`;
+      let out = `<b>[ LEADERBOARD TOP 5 SKOR ]</b>\n\n`;
       if (top.length === 0) {
         out += `<i>Belum ada pemain dengan poin. Ayo main game untuk mengumpulkan poin!</i>\n`;
       } else {
-        const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+        const ranks = ['[1]', '[2]', '[3]', '[4]', '[5]'];
         top.forEach((u, i) => {
-          const medal = medals[i] || '•';
-          out += `${medal} <b>${u.pushName || 'Pemain'}</b>: ${u.score} Poin (${u.gamesWon || 0} Menang)\n`;
+          const rank = ranks[i] || '•';
+          out += `${rank} <b>${u.pushName || 'Pemain'}</b>: ${u.score} Poin (${u.gamesWon || 0} Menang)\n`;
         });
       }
 
       const keyboard = new InlineKeyboard()
-        .text('🎲 Main Game Dadu', 'menu_cat:dice_picker')
-        .text('⬅️ Menu Utama', 'menu_main');
+        .text('[ GAME DADU ]', 'menu_cat:dice_picker')
+        .text('[ « KEMBALI ]', 'menu_main');
 
-      await ctx.reply(out, { parse_mode: 'HTML', reply_markup: keyboard });
+      await safeEditOrReply(ctx, out, keyboard);
       return;
     }
 
     // 7. Quick AI
     if (data === 'quick_ai') {
-      let out = `🤖 <b>CARA MENGGUNAKAN AI DI TELEGRAM</b>\n\n`;
-      out += `Kamu bisa langsung mengetik:\n`;
-      out += `<code>/ai Ceritakan dongeng pendek tentang robot kucing</code>\n\n`;
-      out += `Atau fitur cerdas lainnya:\n`;
-      out += `• <code>/explain &lt;kode&gt;</code> - Menjelaskan fungsi kode\n`;
-      out += `• <code>/summarize &lt;teks&gt;</code> - Merangkum bacaan\n`;
-      out += `• <code>/translate &lt;teks&gt;</code> - Menerjemahkan bahasa`;
+      let out = `<b>[ PANDUAN PENGGUNAAN AI ]</b>\n\n`;
+      out += `Ketik langsung perintah berikut di chat:\n`;
+      out += `• <code>/ai Ceritakan ringkasan sejarah komputer</code>\n`;
+      out += `• <code>/explain console.log("hello")</code>\n`;
+      out += `• <code>/summarize &lt;artikel panjang&gt;</code>\n`;
+      out += `• <code>/translate &lt;kalimat bahasa asing&gt;</code>`;
 
-      const keyboard = new InlineKeyboard().text('⬅️ Menu Utama', 'menu_main');
-      await ctx.reply(out, { parse_mode: 'HTML', reply_markup: keyboard });
+      const keyboard = new InlineKeyboard().text('[ « KEMBALI ]', 'menu_main');
+      await safeEditOrReply(ctx, out, keyboard);
       return;
     }
 
     // 8. Quick Shortcuts Menu
     if (data === 'quick_buttons') {
       const keyboard = new InlineKeyboard()
-        .text('💡 Tanya AI', 'quick_ai')
-        .text('🎲 Dadu Berhadiah', 'dice_roll:dice')
+        .text('[ TANYA AI ]', 'quick_ai')
+        .text('[ TEBAK GAMBAR ]', 'quick_tg')
         .row()
-        .text('🎰 Slot Machine', 'dice_roll:slots')
-        .text('🏆 Leaderboard', 'quick_leaderboard')
+        .text('[ CASINO 777 ]', 'dice_roll:slots')
+        .text('[ LEADERBOARD ]', 'quick_leaderboard')
         .row()
-        .text('👤 Profil ID', 'quick_whoami')
-        .text('⬅️ Menu Utama', 'menu_main');
+        .text('[ CEK IP SAYA ]', 'quick_ip')
+        .text('[ « KEMBALI ]', 'menu_main');
 
-      await ctx.reply('⚡ <b>PINTASAN CEPAT INTERAKTIF</b>\n\nPilih aksi di bawah ini dengan menekan tombol:', {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
+      await safeEditOrReply(ctx, '[ PINTASAN CEPAT INTERAKTIF ]\n\nPilih aksi di bawah ini dengan menekan tombol:', keyboard);
+      return;
+    }
+
+    // 9. Quick IP
+    if (data === 'quick_ip') {
+      try {
+        const res = await fetch('http://ip-api.com/json/?fields=status,message,country,city,isp,query');
+        const dataIp = await res.json();
+        let out = `<b>[ INFORMASI IP SERVER ]</b>\n\n`;
+        out += `• IP: <code>${dataIp.query}</code>\n`;
+        out += `• Negara: ${dataIp.country}\n`;
+        out += `• Kota: ${dataIp.city}\n`;
+        out += `• ISP: ${dataIp.isp}\n`;
+
+        const keyboard = new InlineKeyboard().text('[ « KEMBALI ]', 'menu_main');
+        await safeEditOrReply(ctx, out, keyboard);
+      } catch {
+        await safeEditOrReply(ctx, '[!] Gagal mengambil informasi IP.', new InlineKeyboard().text('[ « KEMBALI ]', 'menu_main'));
+      }
+      return;
+    }
+
+    // 10. Quick Tebak Gambar Launch
+    if (data === 'quick_tg') {
+      if (activeGames.has(chatId)) {
+        await ctx.reply('Masih ada permainan yang sedang berlangsung di chat ini. Ketik /nyerah jika menyerah.');
+        return;
+      }
+
+      const item = tebakGambarList[Math.floor(Math.random() * tebakGambarList.length)];
+      const timeoutSec = 60;
+
+      const timer = setTimeout(async () => {
+        if (activeGames.has(chatId)) {
+          activeGames.delete(chatId);
+          await ctx.reply(`[-] Waktu Habis! Jawaban yang benar adalah: <b>${item.answer}</b>`, { parse_mode: 'HTML' });
+        }
+      }, timeoutSec * 1000);
+
+      activeGames.set(chatId, {
+        type: 'tebakgambar',
+        answer: item.answer,
+        reward: 50,
+        timer,
       });
+
+      let caption = `<b>[ TEBAK GAMBAR INTERAKTIF ]</b>\n\n`;
+      caption += `• Petunjuk: <code>${item.clue}</code>\n`;
+      caption += `• Waktu: <b>${timeoutSec} detik</b>\n`;
+      caption += `• Hadiah: <b>+50 Poin</b>\n\n`;
+      caption += `Ketik jawabanmu langsung di chat ini (atau ketik <code>/nyerah</code>).`;
+
+      try {
+        await ctx.replyWithPhoto(item.image, {
+          caption,
+          parse_mode: 'HTML',
+        });
+      } catch {
+        await ctx.reply(`${caption}\n\nTautan Gambar: ${item.image}`, { parse_mode: 'HTML' });
+      }
       return;
     }
   } catch (err) {
@@ -706,33 +798,28 @@ export async function initTelegram() {
   try {
     botInstance = new Bot(token);
 
-    // Dapatkan data profil bot
     botInfo = await botInstance.api.getMe();
-    logger.info(`🤖 Telegram Bot Berhasil Terhubung sebagai @${botInfo.username} (${botInfo.first_name})`);
+    logger.info(`Telegram Bot Berhasil Terhubung sebagai @${botInfo.username} (${botInfo.first_name})`);
 
-    // Daftarkan listener pesan
     botInstance.on(['message:text', 'message:caption'], async (ctx) => {
       await handleTelegramMessage(botInstance, ctx);
     });
 
-    // Daftarkan listener tombol interaktif (InlineKeyboard callback)
     botInstance.on('callback_query:data', async (ctx) => {
       await handleTelegramCallback(botInstance, ctx);
     });
 
-    // Error handling
     botInstance.catch((err) => {
       logger.error('[Telegram] Polling error:', err.message);
     });
 
-    // Mulai polling secara asynchronous (non-blocking)
     connectStartTime = Date.now();
     botStatus = 'connected';
 
     botInstance.start({
       drop_pending_updates: true,
       onStart: (info) => {
-        logger.info(`🚀 Telegram Polling aktif untuk @${info.username}`);
+        logger.info(`Telegram Polling aktif untuk @${info.username}`);
       },
     });
 
