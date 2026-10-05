@@ -67,6 +67,7 @@ export function registerGroupCommands() {
     category: 'group',
     description: 'Menandai (mention) seluruh anggota grup secara senyap',
     usage: '.hidetag <pesan>',
+    platforms: ['whatsapp'],
     async execute({ sock, msg, jid, sender, fullText, isGroup, reply, config }) {
       if (!jid.endsWith('@g.us')) {
         return reply('[!] Perintah ini hanya dapat digunakan di dalam Grup WhatsApp.');

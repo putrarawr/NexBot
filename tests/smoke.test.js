@@ -18,7 +18,9 @@ import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
 import { registerGroupCommands, setAfk, getAfk, removeAfk } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { execSync } from 'node:child_process';
-import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, getTelegramBotState } from '../src/bot/telegram.js';
+import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, handleTelegramCallback, buildTelegramMainMenu, getTelegramBotState } from '../src/bot/telegram.js';
+import { registerTelegramExclusiveCommands } from '../src/modules/telegram/index.js';
+import { isCommandSupported } from '../src/bot/handler.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -359,6 +361,58 @@ async function runAllTests() {
     await handleTelegramMessage(mockBot, mockCtx);
     assert.ok(replies.length >= 2, 'Should receive Pong and latency replies');
     assert.ok(replies[0].text.includes('Pong!'));
+  });
+
+  await test('Telegram exclusive commands are registered and platform separation is enforced', async () => {
+    registerTelegramExclusiveCommands();
+    const diceCmd = commands.get('dice');
+    const hidetagCmd = commands.get('hidetag');
+
+    assert.ok(diceCmd, 'dice command should be registered');
+    assert.equal(isCommandSupported(diceCmd, 'telegram'), true, 'dice supported on telegram');
+    assert.equal(isCommandSupported(diceCmd, 'whatsapp'), false, 'dice NOT supported on whatsapp');
+
+    assert.ok(hidetagCmd, 'hidetag command should be registered');
+    assert.equal(isCommandSupported(hidetagCmd, 'whatsapp'), true, 'hidetag supported on whatsapp');
+    assert.equal(isCommandSupported(hidetagCmd, 'telegram'), false, 'hidetag NOT supported on telegram');
+  });
+
+  await test('buildTelegramMainMenu generates interactive InlineKeyboard buttons', () => {
+    const menu = buildTelegramMainMenu('Putra');
+    assert.ok(menu.text.toLowerCase().includes('putra'), 'Menu should greet user');
+    assert.ok(menu.keyboard, 'Menu should have inline keyboard');
+    const json = JSON.stringify(menu.keyboard);
+    assert.ok(json.includes('menu_cat:game'), 'Keyboard should have game category button');
+    assert.ok(json.includes('menu_cat:ai'), 'Keyboard should have AI category button');
+    assert.ok(json.includes('dice_picker'), 'Keyboard should have dice picker button');
+  });
+
+  await test('handleTelegramCallback handles menu navigation and dice games', async () => {
+    const sentTexts = [];
+    const mockCtx = {
+      callbackQuery: { data: 'menu_cat:game' },
+      from: { id: 112233, first_name: 'Putra', username: 'putra_dev' },
+      answerCallbackQuery: async () => {},
+      editMessageText: async (text, opts) => {
+        sentTexts.push({ type: 'edit', text, opts });
+      },
+      reply: async (text, opts) => {
+        sentTexts.push({ type: 'reply', text, opts });
+      },
+      replyWithDice: async (emoji) => {
+        return { dice: { value: 6 } };
+      },
+    };
+
+    await handleTelegramCallback(null, mockCtx);
+    assert.equal(sentTexts.length, 1);
+    assert.ok(sentTexts[0].text.includes('GAME & KUIS'), 'Should display game category text');
+
+    // Test interactive dice roll
+    mockCtx.callbackQuery.data = 'dice_roll:dice';
+    await handleTelegramCallback(null, mockCtx);
+    assert.equal(sentTexts.length, 2);
+    assert.ok(sentTexts[1].text.includes('ANGKA TERTINGGI 6'), 'Should calculate score for dice roll 6');
   });
 
   // 5. Web Server & REST API Tests

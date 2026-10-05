@@ -17,8 +17,16 @@ export const commands = new Map();
 export const aliases = new Map();
 
 export function registerCommand(commandDef) {
-  const { name, aliases: aliasList = [], category = 'general', description = '', usage = '', execute } = commandDef;
-  const cmdObj = { name, aliases: aliasList, category, description, usage, execute };
+  const {
+    name,
+    aliases: aliasList = [],
+    category = 'general',
+    description = '',
+    usage = '',
+    platforms = ['whatsapp', 'telegram'],
+    execute,
+  } = commandDef;
+  const cmdObj = { name, aliases: aliasList, category, description, usage, platforms, execute };
   commands.set(name.toLowerCase(), cmdObj);
 
   for (const alias of aliasList) {
@@ -26,13 +34,20 @@ export function registerCommand(commandDef) {
   }
 }
 
-export function getCommandsByCategory() {
+export function isCommandSupported(cmd, platform) {
+  if (!cmd || !cmd.platforms) return true;
+  return cmd.platforms.includes(platform);
+}
+
+export function getCommandsByCategory(platform = null) {
   const categories = {};
   for (const cmd of commands.values()) {
+    if (platform && !isCommandSupported(cmd, platform)) {
+      continue;
+    }
     if (!categories[cmd.category]) {
       categories[cmd.category] = [];
     }
-    // Hindari duplikasi jika command memiliki beberapa alias
     if (!categories[cmd.category].some((c) => c.name === cmd.name)) {
       categories[cmd.category].push(cmd);
     }
@@ -190,6 +205,12 @@ export async function messageHandler(sock, chatUpdate) {
       return;
     }
 
+    // 2b. Cek dukungan platform WhatsApp
+    if (!isCommandSupported(command, 'whatsapp')) {
+      await reply(`[!] Perintah *${prefix}${cmdName}* eksklusif untuk platform Telegram.\nGunakan bot Telegram kami di @NexBot12345_bot untuk mengakses fitur ini.`);
+      return;
+    }
+
     // 3. Rate limiting per user
     const rateCheck = checkRateLimit(sender);
     if (rateCheck.limited) {
@@ -251,7 +272,7 @@ registerCommand({
   description: 'Menampilkan seluruh daftar menu & perintah bot',
   usage: '.menu',
   async execute({ reply, config, prefix, pushName }) {
-    const categories = getCommandsByCategory();
+    const categories = getCommandsByCategory('whatsapp');
     const categoryHeaders = {
       media: 'MEDIA, STIKER & PHOTOLIVE',
       downloader: 'SOCIAL MEDIA DOWNLOADER',
