@@ -42,18 +42,26 @@ export async function executeCode(language, code) {
   };
 
   const start = Date.now();
-  const res = await fetch('https://wandbox.org/api/compile.json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(20000),
-  });
-
-  const duration = Date.now() - start;
-  if (!res.ok) {
-    throw new Error(`Wandbox runner error HTTP ${res.status}`);
+  let res;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      res = await fetch('https://wandbox.org/api/compile.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) break;
+    } catch (e) {
+      if (attempt === 1) throw e;
+    }
+    await new Promise((r) => setTimeout(r, 600));
   }
 
+  const duration = Date.now() - start;
+  if (!res || !res.ok) {
+    throw new Error(`Wandbox runner error HTTP ${res?.status || 500}`);
+  }
   const data = await res.json();
   const stdout = data.program_output || data.compiler_output || '';
   const stderr = data.program_error || data.compiler_error || '';

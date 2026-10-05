@@ -266,6 +266,45 @@ registerCommand({
 });
 
 registerCommand({
+  name: 'clear',
+  aliases: ['cls', 'purge', 'bersihkan', 'hapus'],
+  category: 'general',
+  description: 'Membersihkan riwayat pesan chat terbaru',
+  usage: '.clear [jumlah pesan, contoh: /clear 10]',
+  async execute({ sock, msg, jid, args, reply, ctx, platform }) {
+    const count = Math.min(Math.max(parseInt(args[0] || '10', 10), 1), 100);
+
+    if (platform === 'telegram' && ctx?.api && ctx?.chat?.id) {
+      const currentMsgId = ctx.message?.message_id;
+      let deleted = 0;
+      if (currentMsgId) {
+        for (let i = 0; i <= count; i++) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat.id, currentMsgId - i);
+            deleted++;
+          } catch {}
+        }
+      }
+
+      const notif = await ctx.reply(`[+] Berhasil membersihkan ${deleted} pesan chat.`);
+      setTimeout(async () => {
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, notif.message_id);
+        } catch {}
+      }, 3500);
+      return;
+    }
+
+    try {
+      if (msg?.key) {
+        await sock.sendMessage(jid, { delete: msg.key });
+      }
+    } catch {}
+    await reply(`[+] Perintah pembersihan chat selesai diproses.`);
+  },
+});
+
+registerCommand({
   name: 'menu',
   aliases: ['help', 'bantuan'],
   category: 'general',

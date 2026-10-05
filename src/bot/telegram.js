@@ -823,6 +823,25 @@ export async function initTelegram() {
     botInfo = await botInstance.api.getMe();
     logger.info(`Telegram Bot Berhasil Terhubung sebagai @${botInfo.username} (${botInfo.first_name})`);
 
+    // Daftarkan command autocomplete popup Telegram secara otomatis
+    try {
+      const tgCommands = [];
+      for (const cmd of commands.values()) {
+        if (isCommandSupported(cmd, 'telegram') && !tgCommands.some((c) => c.command === cmd.name)) {
+          const cleanDesc = (cmd.description || 'Perintah NexBot').replace(/<[^>]*>/g, '').slice(0, 100);
+          tgCommands.push({
+            command: cmd.name.toLowerCase(),
+            description: cleanDesc,
+          });
+        }
+      }
+      if (tgCommands.length > 0) {
+        await botInstance.api.setMyCommands(tgCommands.slice(0, 100));
+        logger.info(`[Telegram] ${tgCommands.length} perintah otomatis didaftarkan ke menu autocomplete Telegram.`);
+      }
+    } catch (cmdErr) {
+      logger.warn('[Telegram] Gagal mendaftarkan setMyCommands:', cmdErr.message);
+    }
     botInstance.on(['message:text', 'message:caption'], async (ctx) => {
       await handleTelegramMessage(botInstance, ctx);
     });
