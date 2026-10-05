@@ -39,6 +39,14 @@ export function getTelegramBotState() {
   };
 }
 
+export function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /**
  * Konversi teks bergaya WhatsApp ke HTML Telegram yang aman
  */
@@ -178,13 +186,26 @@ export async function safeEditOrReply(ctx, text, keyboard) {
     if (err.message && err.message.includes('not modified')) {
       return null;
     }
+
+    // Fallback: strip tags jika parsing HTML ditolak Telegram
+    const plainText = text.replace(/<[^>]*>/g, '');
     try {
-      return await ctx.reply(text, {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
-      });
+      if (hasPhoto) {
+        return await ctx.editMessageCaption({
+          caption: plainText,
+          reply_markup: keyboard,
+        });
+      } else {
+        return await ctx.editMessageText(plainText, {
+          reply_markup: keyboard,
+        });
+      }
     } catch {
-      return null;
+      try {
+        return await ctx.reply(plainText, { reply_markup: keyboard });
+      } catch {
+        return null;
+      }
     }
   }
 }
@@ -241,13 +262,14 @@ export function buildCategoryMenu(catName) {
     text += `<i>Belum ada perintah yang terdaftar di kategori ini.</i>\n`;
   } else {
     for (const cmd of list) {
-      text += `• <b>/${cmd.name}</b> : ${cmd.description || 'Fitur NexBot'}\n`;
-      if (cmd.usage) {
-        text += `  <i>Format: <code>${cmd.usage}</code></i>\n`;
+      const cleanDesc = escapeHtml(cmd.description || 'Fitur NexBot');
+      const cleanUsage = cmd.usage ? escapeHtml(cmd.usage) : '';
+      text += `• <b>/${cmd.name}</b> : ${cleanDesc}\n`;
+      if (cleanUsage) {
+        text += `  <i>Format: <code>${cleanUsage}</code></i>\n`;
       }
     }
   }
-
   const keyboard = new InlineKeyboard();
 
   if (catName === 'game') {
@@ -538,7 +560,7 @@ export async function handleTelegramCallback(_bot, ctx) {
       for (const [cat, list] of Object.entries(categories)) {
         text += `<b>[ ${cat.toUpperCase()} ]</b>\n`;
         for (const item of list) {
-          text += `• /${item.name} - <i>${item.description}</i>\n`;
+          text += `• /${item.name} - <i>${escapeHtml(item.description)}</i>\n`;
         }
         text += `\n`;
       }
