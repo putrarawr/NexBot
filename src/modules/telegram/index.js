@@ -1,4 +1,6 @@
-import { InlineKeyboard } from 'grammy';
+import fs from 'node:fs';
+import path from 'node:path';
+import { InlineKeyboard, InputFile } from 'grammy';
 import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
 
@@ -151,6 +153,138 @@ export function registerTelegramExclusiveCommands() {
         parse_mode: 'HTML',
         reply_markup: keyboard,
       });
+    },
+  });
+
+  // 5. Ganti Banner Menu (/setbanner)
+  registerCommand({
+    name: 'setbanner',
+    aliases: ['gantibanner', 'updatebanner'],
+    category: 'telegram',
+    description: 'Mengganti gambar banner atau GIF animasi di menu bot',
+    usage: '/setbanner [kirim media / balas media]',
+    platforms: ['telegram'],
+    async execute({ ctx, reply, config }) {
+      if (!ctx?.message) return;
+
+      const userId = String(ctx.from?.id || '');
+      const ownerId = String(config.telegramOwnerId || process.env.TELEGRAM_OWNER_ID || '');
+      const isOwner = Boolean(ownerId) && userId === ownerId;
+
+      if (!isOwner) {
+        return reply('[!] Perintah ini hanya dapat digunakan oleh Pemilik (Owner) bot.');
+      }
+
+      const targetMsg = ctx.message.reply_to_message || ctx.message;
+      let fileId = null;
+      let isAnimation = false;
+      let animationExtension = '.mp4';
+
+      if (targetMsg.animation) {
+        fileId = targetMsg.animation.file_id;
+        isAnimation = true;
+        animationExtension = path.extname(targetMsg.animation.file_name || '').toLowerCase() === '.gif' ? '.gif' : '.mp4';
+      } else if (targetMsg.photo && targetMsg.photo.length > 0) {
+        fileId = targetMsg.photo[targetMsg.photo.length - 1].file_id;
+      } else if (targetMsg.video) {
+        fileId = targetMsg.video.file_id;
+        isAnimation = true;
+        animationExtension = path.extname(targetMsg.video.file_name || '').toLowerCase() === '.gif' ? '.gif' : '.mp4';
+      } else if (targetMsg.document) {
+        fileId = targetMsg.document.file_id;
+        const fileName = targetMsg.document.file_name || '';
+        const mimeType = targetMsg.document.mime_type || '';
+        if (/\.gif$/i.test(fileName) || /\.mp4$/i.test(fileName) || mimeType === 'image/gif' || mimeType === 'video/mp4') {
+          isAnimation = true;
+          animationExtension = /\.gif$/i.test(fileName) || mimeType === 'image/gif' ? '.gif' : '.mp4';
+        }
+      }
+
+      if (!fileId) {
+        return reply('[!] Format salah. Kirim gambar atau GIF dengan caption /setbanner, atau balas (reply) media yang ingin dijadikan banner.');
+      }
+
+      await reply('[-] Sedang mengunduh dan menerapkan banner baru...');
+
+      try {
+        const token = config.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+        const file = await ctx.api.getFile(fileId);
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+        const res = await fetch(fileUrl);
+        if (!res.ok) throw new Error(`Unduhan media gagal (HTTP ${res.status}).`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+
+        const bannerPaths = ['banner.gif', 'banner.mp4', 'jpeg', 'banner.jpg', 'banner.png']
+          .map((name) => path.resolve(process.cwd(), name));
+
+        if (isAnimation) {
+          const animationPath = path.resolve(process.cwd(), `banner${animationExtension}`);
+          fs.writeFileSync(animationPath, buffer);
+          for (const oldPath of bannerPaths) {
+            if (oldPath !== animationPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          }
+          await reply('[+] Banner bot berhasil diperbarui dengan media animasi! Ketik /menu untuk melihatnya.');
+        } else {
+          const photoPath = path.resolve(process.cwd(), 'jpeg');
+          fs.writeFileSync(photoPath, buffer);
+          for (const oldPath of bannerPaths) {
+            if (oldPath !== photoPath && fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+          }
+          await reply('[+] Banner bot berhasil diperbarui dengan foto baru! Ketik /menu untuk melihatnya.');
+        }
+      } catch (err) {
+        logger.error('Error saat setbanner:', err.message);
+        await reply(`[!] Gagal memperbarui banner: ${err.message}`);
+      }
+    },
+  });
+
+  // 6. Ganti Foto Profil Bot (/setpp)
+  registerCommand({
+    name: 'setpp',
+    aliases: ['setprofile', 'gantipp', 'gantifoto'],
+    category: 'telegram',
+    description: 'Mengganti foto profil bot Telegram secara instan',
+    usage: '/setpp [kirim foto dengan caption /setpp atau balas foto]',
+    platforms: ['telegram'],
+    async execute({ ctx, reply, config }) {
+      if (!ctx?.message) return;
+
+      const userId = String(ctx.from?.id || '');
+      const ownerId = String(config.telegramOwnerId || process.env.TELEGRAM_OWNER_ID || '');
+      const isOwner = Boolean(ownerId) && userId === ownerId;
+
+      if (!isOwner) {
+        return reply('[!] Perintah ini hanya dapat digunakan oleh Pemilik (Owner) bot.');
+      }
+
+      const targetMsg = ctx.message.reply_to_message || ctx.message;
+      let fileId = null;
+
+      if (targetMsg.photo && targetMsg.photo.length > 0) {
+        fileId = targetMsg.photo[targetMsg.photo.length - 1].file_id;
+      }
+
+      if (!fileId) {
+        return reply('[!] Balas (reply) foto atau kirim foto dengan caption /setpp untuk mengganti foto profil bot.');
+      }
+
+      await reply('[-] Sedang memproses penggantian foto profil bot...');
+
+      try {
+        const token = config.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN;
+        const file = await ctx.api.getFile(fileId);
+        const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+        const res = await fetch(fileUrl);
+        if (!res.ok) throw new Error(`Unduhan foto gagal (HTTP ${res.status}).`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+
+        await ctx.api.setMyProfilePhoto(new InputFile(buffer, 'profile.jpg'));
+        await reply('[+] Foto profil bot Telegram berhasil diganti!');
+      } catch (err) {
+        logger.error('Error saat setpp:', err.message);
+        await reply(`[!] Gagal mengganti foto profil: ${err.message}`);
+      }
     },
   });
 }

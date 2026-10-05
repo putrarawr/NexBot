@@ -76,12 +76,12 @@ export async function downloadWithYtDlp(url, options = {}) {
   const outTemplate = path.join(os.tmpdir(), `nexdl_${Date.now()}_${rand}.%(ext)s`);
   const isAudio = options.audio === true;
 
-  let formatArg = '-f "b[filesize<35M]/best[ext=mp4]/best"';
+  let formatArg = '-f "bv*+ba/b"';
   if (isAudio) {
-    formatArg = '-f "bestaudio" -x --audio-format mp3';
+    formatArg = '-f "ba/b"';
   }
 
-  const cmd = `yt-dlp --extractor-args "youtube:player_client=android,web" --no-warnings --no-playlist --playlist-items 1 --max-filesize 35M ${formatArg} -o "${outTemplate}" "${url}"`;
+  const cmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 --max-filesize 45M ${formatArg} -o "${outTemplate}" "${url}"`;
 
   try {
     await execAsync(cmd, { timeout: 45000 });
@@ -135,15 +135,21 @@ export async function downloadSpotifyTrack(queryOrUrl) {
   const rand = Math.random().toString(36).slice(2, 8);
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
 
-  // Target pencarian audio
-  const searchTarget = searchTerm.startsWith('http') ? searchTerm : `ytsearch1:${searchTerm}`;
-  const cmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -x --audio-format mp3 --max-filesize 35M -o "${outTemplate}" "${searchTarget}"`;
+  // Target pencarian audio via SoundCloud (anti-403 & cepat), fallback ke YouTube
+  const searchTarget = searchTerm.startsWith('http') ? searchTerm : `scsearch1:${searchTerm}`;
+  const cmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" --max-filesize 35M -o "${outTemplate}" "${searchTarget}"`;
 
   try {
     await execAsync(cmd, { timeout: 45000 });
   } catch (err) {
-    logger.warn('Spotify/Audio download failed:', err.message);
-    throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+    logger.warn('SoundCloud search failed, mencoba fallback YouTube:', err.message);
+    const ytCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" --no-warnings --no-playlist --playlist-items 1 -f "ba/b" --max-filesize 35M -o "${outTemplate}" "ytsearch1:${searchTerm}"`;
+    try {
+      await execAsync(ytCmd, { timeout: 45000 });
+    } catch (ytErr) {
+      logger.warn('YouTube fallback failed:', ytErr.message);
+      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+    }
   }
 
   const files = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spot_') && f.includes(rand));

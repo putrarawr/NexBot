@@ -21,9 +21,20 @@ let botInstance = null;
 let botStatus = 'disconnected'; // 'disconnected' | 'connecting' | 'connected' | 'error'
 let botInfo = null;
 let connectStartTime = null;
+export function getActiveBanner() {
+  const gifPath = path.resolve(process.cwd(), 'banner.gif');
+  const mp4Path = path.resolve(process.cwd(), 'banner.mp4');
+  const jpegPath = path.resolve(process.cwd(), 'jpeg');
+  const jpgPath = path.resolve(process.cwd(), 'banner.jpg');
+  const pngPath = path.resolve(process.cwd(), 'banner.png');
 
-const BANNER_PATH = path.resolve(process.cwd(), 'jpeg');
-
+  if (fs.existsSync(gifPath)) return { path: gifPath, type: 'animation' };
+  if (fs.existsSync(mp4Path)) return { path: mp4Path, type: 'animation' };
+  if (fs.existsSync(jpegPath)) return { path: jpegPath, type: 'photo' };
+  if (fs.existsSync(jpgPath)) return { path: jpgPath, type: 'photo' };
+  if (fs.existsSync(pngPath)) return { path: pngPath, type: 'photo' };
+  return null;
+}
 export function getTelegramBot() {
   return botInstance;
 }
@@ -168,9 +179,10 @@ export function createTelegramSocketAdapter(bot, ctx, targetChatId) {
  * Helper Edit Pesan Aman (Menangani Pesan Berupa Foto Maupun Teks Biasa)
  */
 export async function safeEditOrReply(ctx, text, keyboard) {
-  const hasPhoto = Boolean(ctx.callbackQuery?.message?.photo);
+  const msg = ctx.callbackQuery?.message;
+  const hasMedia = Boolean(msg?.photo || msg?.animation || msg?.video || msg?.document);
   try {
-    if (hasPhoto) {
+    if (hasMedia) {
       return await ctx.editMessageCaption({
         caption: text,
         parse_mode: 'HTML',
@@ -190,7 +202,7 @@ export async function safeEditOrReply(ctx, text, keyboard) {
     // Fallback: strip tags jika parsing HTML ditolak Telegram
     const plainText = text.replace(/<[^>]*>/g, '');
     try {
-      if (hasPhoto) {
+      if (hasMedia) {
         return await ctx.editMessageCaption({
           caption: plainText,
           reply_markup: keyboard,
@@ -322,15 +334,24 @@ export function buildDicePicker() {
  * Mengirim Menu Utama dengan Banner JPEG jika Tersedia
  */
 export async function sendTelegramMenuWithBanner(ctx, menu) {
-  if (fs.existsSync(BANNER_PATH)) {
+  const banner = getActiveBanner();
+  if (banner) {
     try {
-      return await ctx.replyWithPhoto(new InputFile(BANNER_PATH), {
-        caption: menu.text,
-        parse_mode: 'HTML',
-        reply_markup: menu.keyboard,
-      });
+      if (banner.type === 'animation') {
+        return await ctx.replyWithAnimation(new InputFile(banner.path), {
+          caption: menu.text,
+          parse_mode: 'HTML',
+          reply_markup: menu.keyboard,
+        });
+      } else {
+        return await ctx.replyWithPhoto(new InputFile(banner.path), {
+          caption: menu.text,
+          parse_mode: 'HTML',
+          reply_markup: menu.keyboard,
+        });
+      }
     } catch (err) {
-      logger.warn('[Telegram] Gagal mengirim banner jpeg, fallback teks:', err.message);
+      logger.warn('[Telegram] Gagal mengirim banner, fallback teks:', err.message);
     }
   }
 
