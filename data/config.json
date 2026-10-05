@@ -19,7 +19,7 @@
   "aiProvider": "hybrid",
   "groqApiKey": "",
   "geminiApiKey": "",
-  "telegramBotToken": "",
+  "telegramBotToken": "8849511108:AAEh7VkWlCxGHmrPf9YanYYqooSaL8oNS_0",
   "telegramOwnerId": "8244607780",
   "enableWhatsApp": true,
   "enableTelegram": true

@@ -48,6 +48,10 @@ export function initConfig() {
       activeConfig = {
         ...DEFAULT_CONFIG,
         ...parsed,
+        geminiApiKey: process.env.GEMINI_API_KEY || parsed.geminiApiKey || '',
+        groqApiKey: process.env.GROQ_API_KEY || parsed.groqApiKey || '',
+        telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || parsed.telegramBotToken || '',
+        telegramOwnerId: process.env.TELEGRAM_OWNER_ID || parsed.telegramOwnerId || '',
         features: {
           ...DEFAULT_CONFIG.features,
           ...(parsed.features || {}),

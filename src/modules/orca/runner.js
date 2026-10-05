@@ -427,11 +427,12 @@ async function runGeminiAutonomousAgent({ task, geminiKey, mode, onProgress }) {
       }
 
       if (!res.ok) {
-        throw new Error(`Gemini API error HTTP ${res.status}`);
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Gemini API error HTTP ${res.status}: ${errText.slice(0, 200)}`);
       }
     } catch (err) {
       logger.error('Error calling Gemini API:', err.message);
-      break;
+      throw err;
     }
 
     const data = await res.json();
@@ -528,12 +529,13 @@ async function runGroqAutonomousAgent({ task, groqKey, mode, onProgress }) {
       });
 
       if (!res.ok) {
-        throw new Error(`Groq API returned HTTP ${res.status}`);
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Groq API returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
       }
       completion = await res.json();
     } catch (err) {
       logger.error('Error saat memanggil Groq LLM:', err.message);
-      break;
+      throw err;
     }
 
     const choice = completion.choices?.[0];
@@ -592,8 +594,8 @@ async function runGroqAutonomousAgent({ task, groqKey, mode, onProgress }) {
 export async function runOrcaAgent({ task, mode = null, onProgress = null }) {
   const chosenMode = mode || activeAgentMode;
   const config = getConfig();
-  const geminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
-  const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  const geminiKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || '').trim();
+  const groqKey = (process.env.GROQ_API_KEY || config.groqApiKey || '').trim();
 
   if (onProgress) {
     await onProgress(`[ORCA: ${chosenMode.toUpperCase()}] Menginisialisasi model AI...`);
@@ -605,7 +607,15 @@ export async function runOrcaAgent({ task, mode = null, onProgress = null }) {
       const result = await runGeminiAutonomousAgent({ task, geminiKey, mode: chosenMode, onProgress });
       if (result) return result;
     } catch (geminiErr) {
-      logger.warn('Gemini agent runner error, mencoba fallback Groq:', geminiErr.message);
+      logger.warn('Gemini agent runner error:', geminiErr.message);
+      if (!groqKey) {
+        return {
+          mode: chosenMode,
+          engine: 'Gemini / Antigravity Model',
+          response: `[ERROR GEMINI RUNNER]\n\n${geminiErr.message}\n\nPastikan GEMINI_API_KEY di Railway Variables valid dan aktif.`,
+          steps: 1,
+        };
+      }
     }
   }
 
@@ -615,7 +625,13 @@ export async function runOrcaAgent({ task, mode = null, onProgress = null }) {
       const result = await runGroqAutonomousAgent({ task, groqKey, mode: chosenMode, onProgress });
       if (result) return result;
     } catch (groqErr) {
-      logger.warn('Groq agent runner error, beralih ke direct fallback:', groqErr.message);
+      logger.warn('Groq agent runner error:', groqErr.message);
+      return {
+        mode: chosenMode,
+        engine: 'Groq Model',
+        response: `[ERROR GROQ RUNNER]\n\n${groqErr.message}\n\nPastikan GROQ_API_KEY di Railway Variables valid.`,
+        steps: 1,
+      };
     }
   }
 
