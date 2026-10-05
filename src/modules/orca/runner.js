@@ -397,24 +397,14 @@ async function runGeminiAutonomousAgent({ task, geminiKey, mode, onProgress }) {
       await onProgress(`[ORCA: ${mode.toUpperCase()} (ANTIGRAVITY/GEMINI)] Langkah ${step}/${maxSteps}: Berpikir & menganalisa...`);
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+    const geminiModels = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash'];
     let res;
-    try {
-      res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemText }] },
-          contents,
-          tools: TOOLS_DEFINITIONS_GEMINI,
-        }),
-        signal: AbortSignal.timeout(35000),
-      });
+    let lastGeminiErr = null;
 
-      if (!res.ok) {
-        // Fallback ke gemini-1.5-flash jika gemini-2.0-flash tidak tersedia
-        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-        res = await fetch(fallbackUrl, {
+    for (const model of geminiModels) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -424,15 +414,21 @@ async function runGeminiAutonomousAgent({ task, geminiKey, mode, onProgress }) {
           }),
           signal: AbortSignal.timeout(35000),
         });
-      }
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Gemini API error HTTP ${res.status}: ${errText.slice(0, 200)}`);
+        if (res.ok) {
+          break;
+        } else {
+          const errText = await res.text().catch(() => '');
+          lastGeminiErr = new Error(`Gemini [${model}] HTTP ${res.status}: ${errText.slice(0, 150)}`);
+        }
+      } catch (e) {
+        lastGeminiErr = e;
       }
-    } catch (err) {
-      logger.error('Error calling Gemini API:', err.message);
-      throw err;
+    }
+
+    if (!res || !res.ok) {
+      logger.error('Error calling Gemini API:', lastGeminiErr?.message);
+      throw lastGeminiErr || new Error('Gagal menghubungi model Gemini / Antigravity.');
     }
 
     const data = await res.json();
@@ -509,33 +505,44 @@ async function runGroqAutonomousAgent({ task, groqKey, mode, onProgress }) {
       await onProgress(`[ORCA: ${mode.toUpperCase()} (GROQ)] Langkah ${step}/${maxSteps}: Berpikir & menganalisa...`);
     }
 
+    const groqModels = ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'llama3-70b-8192'];
     let completion;
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${groqKey}`,
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages,
-          tools: TOOLS_DEFINITIONS_OPENAI,
-          tool_choice: 'auto',
-          temperature: mode === 'vibecode' ? 0.6 : 0.2,
-          max_tokens: 2000,
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
+    let lastGroqErr = null;
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        throw new Error(`Groq API returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    for (const model of groqModels) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${groqKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            tools: TOOLS_DEFINITIONS_OPENAI,
+            tool_choice: 'auto',
+            temperature: mode === 'vibecode' ? 0.6 : 0.2,
+            max_tokens: 2000,
+          }),
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (res.ok) {
+          completion = await res.json();
+          break;
+        } else {
+          const errText = await res.text().catch(() => '');
+          lastGroqErr = new Error(`Groq [${model}] HTTP ${res.status}: ${errText.slice(0, 150)}`);
+        }
+      } catch (e) {
+        lastGroqErr = e;
       }
-      completion = await res.json();
-    } catch (err) {
-      logger.error('Error saat memanggil Groq LLM:', err.message);
-      throw err;
+    }
+
+    if (!completion) {
+      logger.error('Error saat memanggil Groq LLM:', lastGroqErr?.message);
+      throw lastGroqErr || new Error('Gagal memanggil model Groq.');
     }
 
     const choice = completion.choices?.[0];
