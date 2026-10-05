@@ -112,7 +112,7 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   let currentLine = '';
 
   for (const word of words) {
-    if ((currentLine + ' ' + word).trim().length > 24) {
+    if ((currentLine + ' ' + word).trim().length > 25) {
       lines.push(currentLine.trim());
       currentLine = word;
     } else {
@@ -123,72 +123,61 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   const displayedLines = lines.slice(0, 5);
 
   const textTspans = displayedLines
-    .map((line, i) => `<tspan x="82" y="${213 + i * 32}">${line}</tspan>`)
+    .map((line, i) => `<tspan x="65" y="${208 + i * 30}">${line}</tspan>`)
     .join('');
 
-  // iOS-style quote card with a soft blurred background. Keep the artwork
-  // limited to shapes and regular text so librsvg renders it consistently.
   const svg = `
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="24"/>
-    </filter>
-    <linearGradient id="pageBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0d1324"/>
-      <stop offset="55%" stop-color="#20152d"/>
-      <stop offset="100%" stop-color="#08131b"/>
+    <linearGradient id="avatarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A84FF"/>
+      <stop offset="100%" stop-color="#5E5CE6"/>
     </linearGradient>
-    <linearGradient id="cardBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#141827" stop-opacity="0.96"/>
-      <stop offset="100%" stop-color="#0a0d16" stop-opacity="0.96"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#55d6ff"/>
-      <stop offset="100%" stop-color="#9b7bff"/>
+    <linearGradient id="bubbleBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1C1C1E"/>
+      <stop offset="100%" stop-color="#262629"/>
     </linearGradient>
   </defs>
 
-  <rect width="512" height="512" fill="url(#pageBg)"/>
-  <g filter="url(#softBlur)" opacity="0.8">
-    <circle cx="70" cy="100" r="100" fill="#1f75b5"/>
-    <circle cx="430" cy="105" r="120" fill="#7c3fa4"/>
-    <circle cx="392" cy="438" r="130" fill="#176f75"/>
-    <circle cx="112" cy="420" r="105" fill="#4a245f"/>
-  </g>
-  <rect width="512" height="512" fill="#050811" opacity="0.42"/>
+  <!-- 1. Floating iOS Reaction Bar Pill -->
+  <rect x="80" y="24" width="352" height="46" rx="23" fill="#2C2C2E" stroke="#3A3A3C" stroke-width="1.5"/>
+  <circle cx="118" cy="47" r="11" fill="#FF453A"/>
+  <circle cx="170" cy="47" r="11" fill="#FF9F0A"/>
+  <circle cx="222" cy="47" r="11" fill="#0A84FF"/>
+  <circle cx="274" cy="47" r="11" fill="#BF5AF2"/>
+  <circle cx="326" cy="47" r="11" fill="#30D158"/>
+  <circle cx="378" cy="47" r="11" fill="#64D2FF"/>
 
-  <!-- Floating reaction bar -->
-  <rect x="76" y="24" width="360" height="48" rx="24" fill="#111624" fill-opacity="0.94" stroke="#8793b5" stroke-opacity="0.55" stroke-width="1.5"/>
-  <circle cx="114" cy="48" r="11" fill="#ff6f91"/><circle cx="168" cy="48" r="11" fill="#ffc857"/>
-  <circle cx="222" cy="48" r="11" fill="#5ed3ff"/><circle cx="276" cy="48" r="11" fill="#9b7bff"/>
-  <circle cx="330" cy="48" r="11" fill="#69e6a5"/><circle cx="384" cy="48" r="11" fill="#f3f5ff"/>
+  <!-- 2. Authentic Floating iOS Chat Bubble -->
+  <rect x="30" y="86" width="452" height="342" rx="26" fill="url(#bubbleBg)" stroke="#38383A" stroke-width="2"/>
+  <rect x="30" y="98" width="4" height="318" rx="2" fill="#0A84FF"/>
 
-  <!-- Main quote card -->
-  <rect x="30" y="86" width="452" height="342" rx="30" fill="url(#cardBg)" stroke="#7582a6" stroke-opacity="0.55" stroke-width="2"/>
-  <rect x="30" y="86" width="452" height="5" rx="2.5" fill="url(#accent)"/>
+  <!-- Avatar Header -->
+  <circle cx="78" cy="136" r="26" fill="url(#avatarGrad)"/>
+  <text x="78" y="145" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="20" font-weight="bold" fill="#FFFFFF" text-anchor="middle">${initial}</text>
 
-  <circle cx="75" cy="134" r="26" fill="url(#accent)"/>
-  <text x="75" y="142" font-family="sans-serif" font-size="20" font-weight="700" fill="#07101c" text-anchor="middle">${initial}</text>
-  <text x="115" y="130" font-family="sans-serif" font-size="18" font-weight="700" fill="#ffffff">${cleanName}</text>
-  <text x="115" y="150" font-family="sans-serif" font-size="12" fill="#9aa8c7">Chat quote  •  ${senderNumber || 'Verified'}</text>
-  <line x1="62" y1="172" x2="450" y2="172" stroke="#5d6888" stroke-opacity="0.45" stroke-width="1.2"/>
+  <!-- Author Name & Subtitle -->
+  <text x="120" y="132" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="19" font-weight="bold" fill="#FFFFFF">${cleanName}</text>
+  <text x="120" y="152" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="12" fill="#8E8E93">iMessage • ${senderNumber || 'Verified'}</text>
 
-  <!-- iMessage-style inner bubble and tail -->
-  <path d="M62 186 H414 C432 186 446 200 446 218 V320 C446 338 432 352 414 352 H92 C76 352 62 340 62 322 Z" fill="#252b3d" fill-opacity="0.92"/>
-  <path d="M93 352 C81 374 63 382 45 384 C59 367 62 351 62 329 C70 343 80 350 93 352 Z" fill="#252b3d" fill-opacity="0.92"/>
-  <text x="82" y="216" font-family="sans-serif" font-size="23" font-weight="400" fill="#f5f7ff">
+  <!-- Divider Line -->
+  <line x1="55" y1="174" x2="455" y2="174" stroke="#323236" stroke-width="1.5"/>
+
+  <!-- Message Body Text -->
+  <text font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="22" font-weight="500" fill="#F2F2F7">
     ${textTspans}
   </text>
 
-  <text x="450" y="405" font-family="sans-serif" font-size="11" fill="#9aa8c7" text-anchor="end">Terkirim  •  ${timeStr}</text>
+  <!-- Timestamp with checkmarks -->
+  <text x="450" y="405" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="12" fill="#8E8E93" text-anchor="end">${timeStr} ✓✓</text>
 
-  <rect x="86" y="442" width="340" height="42" rx="14" fill="#111624" fill-opacity="0.94" stroke="#7582a6" stroke-opacity="0.45" stroke-width="1.2"/>
-  <text x="142" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Balas</text>
-  <text x="198" y="468" font-family="sans-serif" font-size="13" fill="#687592" text-anchor="middle">|</text>
-  <text x="256" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Salin</text>
-  <text x="314" y="468" font-family="sans-serif" font-size="13" fill="#687592" text-anchor="middle">|</text>
-  <text x="370" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Teruskan</text>
+  <!-- 3. Bottom Context Action Menu Strip -->
+  <rect x="86" y="442" width="340" height="42" rx="14" fill="#2C2C2E" stroke="#38383A" stroke-width="1.2"/>
+  <text x="142" y="468" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="13" font-weight="bold" fill="#0A84FF" text-anchor="middle">Balas</text>
+  <text x="198" y="468" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
+  <text x="256" y="468" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="13" font-weight="bold" fill="#0A84FF" text-anchor="middle">Salin</text>
+  <text x="314" y="468" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
+  <text x="370" y="468" font-family="Arial, Liberation Sans, DejaVu Sans, Noto Sans, sans-serif" font-size="13" font-weight="bold" fill="#0A84FF" text-anchor="middle">Teruskan</text>
 </svg>
 `;
 

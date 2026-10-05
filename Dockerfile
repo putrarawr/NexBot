@@ -1,7 +1,9 @@
 FROM node:20-alpine
 
-# Install system packages including ffmpeg and yt-dlp for media conversion & downloads
-RUN apk add --no-cache ffmpeg yt-dlp
+# Alpine's repository yt-dlp often trails YouTube changes. Install the current
+# upstream release, plus a known font family for Sharp/librsvg quote rendering.
+RUN apk add --no-cache ffmpeg python3 py3-pip fontconfig ttf-dejavu font-noto font-noto-cjk \
+  && python3 -m pip install --no-cache-dir --break-system-packages --upgrade yt-dlp
 
 # Set working directory
 WORKDIR /app
