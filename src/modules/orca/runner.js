@@ -505,7 +505,7 @@ async function runGroqAutonomousAgent({ task, groqKey, mode, onProgress }) {
       await onProgress(`[ORCA: ${mode.toUpperCase()} (GROQ)] Langkah ${step}/${maxSteps}: Berpikir & menganalisa...`);
     }
 
-    const groqModels = ['llama-3.1-70b-versatile', 'llama-3.1-8b-instant', 'llama3-70b-8192'];
+    const groqModels = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768'];
     let completion;
     let lastGroqErr = null;
 
@@ -601,9 +601,19 @@ async function runGroqAutonomousAgent({ task, groqKey, mode, onProgress }) {
 export async function runOrcaAgent({ task, mode = null, onProgress = null }) {
   const chosenMode = mode || activeAgentMode;
   const config = getConfig();
-  const geminiKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || '').trim();
-  const groqKey = (process.env.GROQ_API_KEY || config.groqApiKey || '').trim();
-
+  const geminiKey = (
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    config.geminiApiKey ||
+    ''
+  ).trim();
+  const groqKey = (
+    process.env.GROQ_API_KEY ||
+    process.env.GROQ_KEY ||
+    config.groqApiKey ||
+    ''
+  ).trim();
   if (onProgress) {
     await onProgress(`[ORCA: ${chosenMode.toUpperCase()}] Menginisialisasi model AI...`);
   }
