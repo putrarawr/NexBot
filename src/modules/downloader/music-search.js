@@ -142,8 +142,10 @@ async function safeUnlink(...filePaths) {
 export async function downloadMusicTrack(target, metadata = {}) {
   let searchTerm = String(target || '').trim();
   let spotifyMeta = null;
+  const isSpotifyUrl = /spotify\.com\/track\/[a-zA-Z0-9]+/i.test(searchTerm);
+  const isDirectMediaUrl = /^https?:\/\//i.test(searchTerm) && !isSpotifyUrl;
 
-  if (/spotify\.com\/track\/[a-zA-Z0-9]+/i.test(searchTerm)) {
+  if (isSpotifyUrl) {
     try {
       const oembedRes = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(searchTerm)}`, {
         signal: AbortSignal.timeout(8000),
@@ -159,11 +161,16 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
   const searchTarget = searchTerm.startsWith('http') ? searchTerm : `scsearch1:${searchTerm}`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 --max-filesize 35M -o "${outTemplate}"`;
-  const cmd = `yt-dlp ${baseArgs} ${shellQuote(searchTarget)}`;
+  const directArgs = isDirectMediaUrl ? '--extractor-args "youtube:player_client=android,web" ' : '';
+  const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
     await execAsync(cmd, { timeout: 60000 });
   } catch (err) {
+    if (isDirectMediaUrl) {
+      logger.warn('Direct music URL download failed:', err.message);
+      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+    }
     logger.warn('SoundCloud music download failed, trying YouTube fallback:', err.message);
     const ytCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" ${baseArgs} ${shellQuote(`ytsearch1:${searchTerm}`)}`;
     try {

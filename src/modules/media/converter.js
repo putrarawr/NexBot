@@ -126,62 +126,66 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
     .map((line, i) => `<tspan x="62" y="${205 + i * 26}">${line}</tspan>`)
     .join('');
 
-  // Authentic iOS Message Bubble (Hold/Context Menu Style)
+  // iOS-style quote card with a soft blurred background. Keep the artwork
+  // limited to shapes and regular text so librsvg renders it consistently.
   const svg = `
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bubbleBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1C1C1E"/>
-      <stop offset="100%" stop-color="#242426"/>
+    <filter id="softBlur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <linearGradient id="pageBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1324"/>
+      <stop offset="55%" stop-color="#20152d"/>
+      <stop offset="100%" stop-color="#08131b"/>
     </linearGradient>
-    <linearGradient id="reactionBg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#2C2C2E"/>
-      <stop offset="100%" stop-color="#3A3A3C"/>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141827" stop-opacity="0.96"/>
+      <stop offset="100%" stop-color="#0a0d16" stop-opacity="0.96"/>
     </linearGradient>
-    <linearGradient id="avatarGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0A84FF"/>
-      <stop offset="100%" stop-color="#5E5CE6"/>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#55d6ff"/>
+      <stop offset="100%" stop-color="#9b7bff"/>
     </linearGradient>
   </defs>
 
-  <!-- 1. iOS Reaction Bar Pill (Hold Action Reaction) -->
-  <rect x="76" y="24" width="360" height="48" rx="24" fill="url(#reactionBg)" stroke="#48484A" stroke-width="1.5"/>
-  <text x="114" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">❤️</text>
-  <text x="168" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">👍</text>
-  <text x="222" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">👎</text>
-  <text x="276" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">😂</text>
-  <text x="330" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">‼️</text>
-  <text x="384" y="56" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" text-anchor="middle">❓</text>
+  <rect width="512" height="512" fill="url(#pageBg)"/>
+  <g filter="url(#softBlur)" opacity="0.8">
+    <circle cx="70" cy="100" r="100" fill="#1f75b5"/>
+    <circle cx="430" cy="105" r="120" fill="#7c3fa4"/>
+    <circle cx="392" cy="438" r="130" fill="#176f75"/>
+    <circle cx="112" cy="420" r="105" fill="#4a245f"/>
+  </g>
+  <rect width="512" height="512" fill="#050811" opacity="0.42"/>
 
-  <!-- 2. Main iOS Chat Bubble (Held State) -->
-  <rect x="30" y="86" width="452" height="342" rx="26" fill="url(#bubbleBg)" stroke="#38383A" stroke-width="2"/>
+  <!-- Floating reaction bar -->
+  <rect x="76" y="24" width="360" height="48" rx="24" fill="#111624" fill-opacity="0.94" stroke="#8793b5" stroke-opacity="0.55" stroke-width="1.5"/>
+  <circle cx="114" cy="48" r="11" fill="#ff6f91"/><circle cx="168" cy="48" r="11" fill="#ffc857"/>
+  <circle cx="222" cy="48" r="11" fill="#5ed3ff"/><circle cx="276" cy="48" r="11" fill="#9b7bff"/>
+  <circle cx="330" cy="48" r="11" fill="#69e6a5"/><circle cx="384" cy="48" r="11" fill="#f3f5ff"/>
 
-  <!-- Avatar Header -->
-  <circle cx="75" cy="134" r="26" fill="url(#avatarGrad)"/>
-  <text x="75" y="143" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" fill="#FFFFFF" text-anchor="middle">${initial}</text>
+  <!-- Main quote card -->
+  <rect x="30" y="86" width="452" height="342" rx="26" fill="url(#cardBg)" stroke="#7582a6" stroke-opacity="0.55" stroke-width="2"/>
+  <rect x="30" y="86" width="452" height="5" rx="2.5" fill="url(#accent)"/>
 
-  <!-- Sender Name & Subtitle -->
-  <text x="115" y="130" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="600" fill="#FFFFFF">${cleanName}</text>
-  <text x="115" y="149" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="500" fill="#8E8E93">iMessage • ${senderNumber || 'Verified'}</text>
+  <circle cx="75" cy="134" r="26" fill="url(#accent)"/>
+  <text x="75" y="142" font-family="sans-serif" font-size="20" font-weight="700" fill="#07101c" text-anchor="middle">${initial}</text>
+  <text x="115" y="130" font-family="sans-serif" font-size="18" font-weight="700" fill="#ffffff">${cleanName}</text>
+  <text x="115" y="150" font-family="sans-serif" font-size="12" fill="#9aa8c7">Chat quote  •  ${senderNumber || 'Verified'}</text>
+  <line x1="62" y1="172" x2="450" y2="172" stroke="#5d6888" stroke-opacity="0.45" stroke-width="1.2"/>
 
-  <!-- Divider line -->
-  <line x1="62" y1="172" x2="450" y2="172" stroke="#2C2C2E" stroke-width="1.2"/>
-
-  <!-- Message Body Text -->
-  <text font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="19" font-weight="400" fill="#F2F2F7" letter-spacing="-0.3">
+  <text font-family="sans-serif" font-size="19" font-weight="400" fill="#f5f7ff">
     ${textTspans}
   </text>
 
-  <!-- Status & Timestamp -->
-  <text x="450" y="405" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500" fill="#8E8E93" text-anchor="end">Terkirim • ${timeStr}</text>
+  <text x="450" y="405" font-family="sans-serif" font-size="11" fill="#9aa8c7" text-anchor="end">Terkirim  •  ${timeStr}</text>
 
-  <!-- 3. iOS Bottom Context Menu Strip -->
-  <rect x="86" y="442" width="340" height="42" rx="14" fill="#242426" stroke="#38383A" stroke-width="1.2"/>
-  <text x="142" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Balas</text>
-  <text x="198" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
-  <text x="256" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Salin</text>
-  <text x="314" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" fill="#636366" text-anchor="middle">•</text>
-  <text x="370" y="468" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" font-size="13" font-weight="600" fill="#0A84FF" text-anchor="middle">Teruskan</text>
+  <rect x="86" y="442" width="340" height="42" rx="14" fill="#111624" fill-opacity="0.94" stroke="#7582a6" stroke-opacity="0.45" stroke-width="1.2"/>
+  <text x="142" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Balas</text>
+  <text x="198" y="468" font-family="sans-serif" font-size="13" fill="#687592" text-anchor="middle">|</text>
+  <text x="256" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Salin</text>
+  <text x="314" y="468" font-family="sans-serif" font-size="13" fill="#687592" text-anchor="middle">|</text>
+  <text x="370" y="468" font-family="sans-serif" font-size="13" font-weight="700" fill="#65d7ff" text-anchor="middle">Teruskan</text>
 </svg>
 `;
 

@@ -581,7 +581,8 @@ export async function handleTelegramCallback(_bot, ctx) {
     const user = ctx.from;
     const pushName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || 'TelegramUser';
     const userId = String(user?.id || 'unknown');
-    const chatId = String(ctx.chat?.id || userId);
+    const callbackChatId = ctx.callbackQuery?.message?.chat?.id || ctx.chat?.id;
+    const chatId = String(callbackChatId || userId);
 
     // 0. Music search selection
     if (data.startsWith('music_pick:')) {
