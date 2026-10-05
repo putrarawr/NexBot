@@ -22,6 +22,8 @@ import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.
 import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, handleTelegramCallback, buildTelegramMainMenu, getTelegramBotState } from '../src/bot/telegram.js';
 import { registerTelegramExclusiveCommands } from '../src/modules/telegram/index.js';
 import { isCommandSupported } from '../src/bot/handler.js';
+import { getAgentMode, setAgentMode, orcaTools } from '../src/modules/orca/runner.js';
+import { registerOrcaCommands } from '../src/modules/orca/index.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -127,6 +129,7 @@ async function runAllTests() {
     registerMediaCommands();
     registerDownloaderCommands();
     registerGroupCommands();
+    registerOrcaCommands();
 
     const expectedCommands = [
       'ping', 'clear', 'menu',
@@ -136,6 +139,7 @@ async function runAllTests() {
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
+      'orca', 'vibecode', 'fix', 'mode', 'sh',
       'hidetag', 'afk',
     ];
 
@@ -433,6 +437,28 @@ async function runAllTests() {
 
     assert.ok(testOutput.includes('15%') || testOutput.includes('STARTING'), 'Should start initial progress');
     await tracker.finish('MUSIC READY');
+  });
+
+  // 4f. Orca Cloud Dev Agent & VibeCode Mode Tests
+  console.log('\n🤖 4f. Orca Cloud Dev Agent & VibeCode Engine:');
+  await test('Orca agent modes switch between normal and vibecode', () => {
+    registerOrcaCommands();
+    assert.equal(getAgentMode(), 'normal');
+    setAgentMode('vibecode');
+    assert.equal(getAgentMode(), 'vibecode');
+    setAgentMode('normal');
+    assert.equal(getAgentMode(), 'normal');
+  });
+
+  await test('Orca tools read files, list files, and search code safely', async () => {
+    const pkgJson = await orcaTools.readFile({ filePath: 'package.json' });
+    assert.ok(pkgJson.includes('bot-wa-dashboard'), 'Should read package.json');
+
+    const files = await orcaTools.listFiles({ dirPath: 'src' });
+    assert.ok(files.includes('index.js'), 'Should list src directory');
+
+    const hits = await orcaTools.searchCode({ pattern: 'registerOrcaCommands', dir: 'src' });
+    assert.ok(hits.includes('registerOrcaCommands'), 'Should find pattern in code');
   });
 
   // 5. Web Server & REST API Tests
