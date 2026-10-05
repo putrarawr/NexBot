@@ -209,4 +209,53 @@ export function registerOrcaCommands() {
       }
     },
   });
+
+  // 6. Command: Model & Quota Status (/models / /quota)
+  registerCommand({
+    name: 'models',
+    aliases: ['quota', 'kuota', 'model'],
+    category: 'programming',
+    description: 'Cek status kuota model AI Antigravity, Gemini, Groq, dan Codex',
+    usage: '/models',
+    async execute({ reply, config }) {
+      const geminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
+      const groqKey = config.groqApiKey || process.env.GROQ_API_KEY;
+      const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
+      let out = `<b>[ STATUS MODEL & KUOTA CLOUD AGENT ]</b>\n\n`;
+
+      out += `• <b>Antigravity (Gemini 2.0 / 1.5 Flash):</b>\n`;
+      if (geminiKey) {
+        out += `  Status: Terhubung via GEMINI_API_KEY\n`;
+        out += `  Batas Kuota: 15 Request/menit (1.000.000 Token/hari, Gratis)\n`;
+        out += `  Akses: Full Tool Calling & Autonomous Coder\n\n`;
+      } else {
+        out += `  Status: Standby (Belum Terpasang)\n`;
+        out += `  Cara pasang: Dapatkan API Key gratis di aistudio.google.com/app/apikey lalu pasang di Variables Railway.\n\n`;
+      }
+
+      out += `• <b>Groq Llama-3.3 70B Versatile:</b>\n`;
+      if (groqKey) {
+        out += `  Status: Terhubung via GROQ_API_KEY\n`;
+        out += `  Kecepatan: ~120 token/detik (Super Cepat)\n`;
+        out += `  Batas Kuota: 30 Request/menit (Gratis)\n\n`;
+      } else {
+        out += `  Status: Standby (Belum Terpasang)\n`;
+        out += `  Cara pasang: Dapatkan di console.groq.com/keys\n\n`;
+      }
+
+      out += `• <b>Codex / Claude (Workstation Session):</b>\n`;
+      out += `  Codex Quota: 100% Used (Reset Tiap Periode)\n`;
+      out += `  Claude Status: Memerlukan Workstation Active Session\n\n`;
+
+      out += `• <b>GitHub Auto-Push (Saat Laptop Mati):</b>\n`;
+      if (ghToken) {
+        out += `  Status: Terhubung via GITHUB_TOKEN (Bisa auto-push 24/7)\n`;
+      } else {
+        out += `  Status: Belum Dipasang (Set GITHUB_TOKEN di Railway agar bisa push saat laptop mati)\n`;
+      }
+
+      await reply(out);
+    },
+  });
 }

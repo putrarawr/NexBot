@@ -4,7 +4,7 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../config.js';
 import { commands, aliases, isCommandSupported, getCommandsByCategory } from './handler.js';
-import { checkRateLimit } from './antiBan.js';
+import { checkRateLimit, reactWait } from './antiBan.js';
 import { incrementCommandStat, addScore, getLeaderboard, activeGames } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import { tebakGambarList } from '../modules/game/questions.js';
@@ -574,6 +574,7 @@ export async function handleTelegramMessage(bot, ctx) {
       prefix: matchedPrefix,
       isGroup,
       ctx,
+      react: (emoji = '👍') => reactWait({ ctx, platform: 'telegram', emoji }),
     });
   } catch (err) {
     logger.error('[Telegram] Error saat menangani pesan:', err);

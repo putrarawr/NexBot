@@ -139,7 +139,7 @@ async function runAllTests() {
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
-      'orca', 'vibecode', 'fix', 'mode', 'sh',
+      'orca', 'vibecode', 'fix', 'mode', 'sh', 'models',
       'hidetag', 'afk',
     ];
 

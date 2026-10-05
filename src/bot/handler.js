@@ -1,6 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { getConfig } from '../config.js';
-import { checkRateLimit, createReplyHelper, isBotSentMessage } from './antiBan.js';
+import { checkRateLimit, createReplyHelper, isBotSentMessage, reactWait } from './antiBan.js';
 import { checkGroupSpamKick } from './antiSpamKick.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
@@ -275,6 +275,8 @@ export async function messageHandler(sock, chatUpdate) {
       reply,
       config,
       prefix,
+      platform: 'whatsapp',
+      react: (emoji = '👍') => reactWait({ sock, jid: remoteJid, msg, platform: 'whatsapp', emoji }),
     });
   } catch (err) {
     logger.error('Error saat menangani pesan masuk:', err);

@@ -32,6 +32,27 @@ export async function safeSendMessage(sock, jid, content, options = {}) {
   }
 }
 
+export async function reactWait({ sock, jid, msg, ctx, platform, emoji = '👍' }) {
+  if (platform === 'telegram' && ctx) {
+    try {
+      if (typeof ctx.react === 'function') {
+        await ctx.react(emoji);
+      } else if (ctx.api && ctx.chat?.id && ctx.message?.message_id) {
+        await ctx.api.setMessageReaction(ctx.chat.id, ctx.message.message_id, [{ type: 'emoji', emoji }]);
+      }
+    } catch {}
+    return;
+  }
+
+  if (sock && jid && msg?.key) {
+    try {
+      await sock.sendMessage(jid, {
+        react: { text: emoji, key: msg.key },
+      });
+    } catch {}
+  }
+}
+
 // Cooldown tracker per sender JID (in milliseconds)
 const userCooldowns = new Map();
 const COOLDOWN_MS = 2500; // 2.5 detik

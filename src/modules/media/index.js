@@ -17,7 +17,7 @@ export function registerMediaCommands() {
     category: 'media',
     description: 'Mengubah foto, video, atau GIF menjadi stiker WhatsApp',
     usage: '.s [kirim foto/video dengan caption .s atau balas media]',
-    async execute({ sock, msg, jid, reply, prefix }) {
+    async execute({ sock, msg, jid, reply, prefix, react }) {
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const isQuotedImage = quoted?.imageMessage;
       const isQuotedVideo = quoted?.videoMessage;
@@ -30,7 +30,7 @@ export function registerMediaCommands() {
         return reply(`[!] Format salah.\nKirim foto atau video pendek dengan caption \`${prefix}s\` atau balas (*reply*) media yang sudah ada.`);
       }
 
-      await reply('[-] Sedang memproses stiker...');
+      if (typeof react === 'function') await react('👍');
 
       try {
         let mediaBuffer;
@@ -76,7 +76,7 @@ export function registerMediaCommands() {
     category: 'media',
     description: 'Mengubah stiker WhatsApp menjadi gambar foto biasa',
     usage: '.toimg [balas stiker]',
-    async execute({ sock, msg, jid, reply }) {
+    async execute({ sock, msg, jid, reply, react }) {
       const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
       const isSticker = quoted?.stickerMessage;
 
@@ -84,7 +84,7 @@ export function registerMediaCommands() {
         return reply('[!] Balas (*reply*) sebuah stiker dengan perintah .toimg untuk mengubahnya jadi foto.');
       }
 
-      await reply('[-] Sedang mengekstrak stiker menjadi gambar...');
+      if (typeof react === 'function') await react('👍');
 
       try {
         const fakeMsg = {
@@ -117,7 +117,7 @@ export function registerMediaCommands() {
     category: 'media',
     description: 'Membuat stiker gelembung quote chat estetik ala Telegram',
     usage: '.qc <teks> atau balas pesan orang lain dengan .qc',
-    async execute({ sock, msg, jid, pushName, sender, fullText, reply, prefix, ctx }) {
+    async execute({ sock, msg, jid, pushName, sender, fullText, reply, prefix, ctx, react }) {
       let textToQuote = fullText?.trim();
       let authorName = pushName || 'User';
       const senderNum = sender.replace(/[^0-9]/g, '');
@@ -141,7 +141,7 @@ export function registerMediaCommands() {
         return reply(`[!] Masukkan teks untuk quote.\nContoh: \`${prefix}qc Kata-kata hari ini\`\natau balas pesan orang lain dengan \`${prefix}qc\`.`);
       }
 
-      await reply('[-] Sedang membuat stiker quote...');
+      if (typeof react === 'function') await react('👍');
 
       try {
         const webpBuffer = await generateQuoteSticker(authorName, textToQuote, senderNum);
