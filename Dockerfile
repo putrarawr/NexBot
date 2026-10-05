@@ -12,12 +12,11 @@ RUN npm install --omit=dev
 # Copy application code
 COPY . .
 
-# Expose default port
-EXPOSE 7860 3000
+# Expose ports
+EXPOSE 8080 3000
 
 # Set environment
 ENV NODE_ENV=production
-ENV PORT=7860
 
 # Start bot and dashboard
 CMD ["node", "src/index.js"]
