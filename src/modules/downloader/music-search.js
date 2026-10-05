@@ -168,16 +168,24 @@ export async function downloadMusicTrack(target, metadata = {}) {
     await execAsync(cmd, { timeout: 60000 });
   } catch (err) {
     if (isDirectMediaUrl) {
-      logger.warn('Direct music URL download failed:', err.message);
-      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
-    }
-    logger.warn('SoundCloud music download failed, trying YouTube fallback:', err.message);
-    const ytCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" ${baseArgs} ${shellQuote(`ytsearch1:${searchTerm}`)}`;
-    try {
-      await execAsync(ytCmd, { timeout: 60000 });
-    } catch (ytErr) {
-      logger.warn('YouTube music fallback failed:', ytErr.message);
-      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+      logger.warn('Direct music URL download failed, trying the candidate title:', err.message);
+      const fallbackQuery = metadata.title || searchTerm;
+      const fallbackCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" ${baseArgs} ${shellQuote(`ytsearch1:${fallbackQuery}`)}`;
+      try {
+        await execAsync(fallbackCmd, { timeout: 60000 });
+      } catch (fallbackErr) {
+        logger.warn('Candidate title fallback failed:', fallbackErr.message);
+        throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+      }
+    } else {
+      logger.warn('SoundCloud music download failed, trying YouTube fallback:', err.message);
+      const ytCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" ${baseArgs} ${shellQuote(`ytsearch1:${searchTerm}`)}`;
+      try {
+        await execAsync(ytCmd, { timeout: 60000 });
+      } catch (ytErr) {
+        logger.warn('YouTube music fallback failed:', ytErr.message);
+        throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+      }
     }
   }
 

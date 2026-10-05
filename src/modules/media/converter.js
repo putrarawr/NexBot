@@ -112,7 +112,7 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   let currentLine = '';
 
   for (const word of words) {
-    if ((currentLine + ' ' + word).trim().length > 30) {
+    if ((currentLine + ' ' + word).trim().length > 24) {
       lines.push(currentLine.trim());
       currentLine = word;
     } else {
@@ -123,7 +123,7 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   const displayedLines = lines.slice(0, 5);
 
   const textTspans = displayedLines
-    .map((line, i) => `<tspan x="62" y="${205 + i * 26}">${line}</tspan>`)
+    .map((line, i) => `<tspan x="82" y="${213 + i * 32}">${line}</tspan>`)
     .join('');
 
   // iOS-style quote card with a soft blurred background. Keep the artwork
@@ -165,7 +165,7 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   <circle cx="330" cy="48" r="11" fill="#69e6a5"/><circle cx="384" cy="48" r="11" fill="#f3f5ff"/>
 
   <!-- Main quote card -->
-  <rect x="30" y="86" width="452" height="342" rx="26" fill="url(#cardBg)" stroke="#7582a6" stroke-opacity="0.55" stroke-width="2"/>
+  <rect x="30" y="86" width="452" height="342" rx="30" fill="url(#cardBg)" stroke="#7582a6" stroke-opacity="0.55" stroke-width="2"/>
   <rect x="30" y="86" width="452" height="5" rx="2.5" fill="url(#accent)"/>
 
   <circle cx="75" cy="134" r="26" fill="url(#accent)"/>
@@ -174,7 +174,10 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
   <text x="115" y="150" font-family="sans-serif" font-size="12" fill="#9aa8c7">Chat quote  •  ${senderNumber || 'Verified'}</text>
   <line x1="62" y1="172" x2="450" y2="172" stroke="#5d6888" stroke-opacity="0.45" stroke-width="1.2"/>
 
-  <text font-family="sans-serif" font-size="19" font-weight="400" fill="#f5f7ff">
+  <!-- iMessage-style inner bubble and tail -->
+  <path d="M62 186 H414 C432 186 446 200 446 218 V320 C446 338 432 352 414 352 H92 C76 352 62 340 62 322 Z" fill="#252b3d" fill-opacity="0.92"/>
+  <path d="M93 352 C81 374 63 382 45 384 C59 367 62 351 62 329 C70 343 80 350 93 352 Z" fill="#252b3d" fill-opacity="0.92"/>
+  <text x="82" y="216" font-family="sans-serif" font-size="23" font-weight="400" fill="#f5f7ff">
     ${textTspans}
   </text>
 
