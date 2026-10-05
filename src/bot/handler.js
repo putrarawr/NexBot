@@ -5,6 +5,7 @@ import { checkGroupSpamKick } from './antiSpamKick.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import { handleAfkInteractions } from '../modules/group/index.js';
+import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -140,7 +141,37 @@ export async function messageHandler(sock, chatUpdate) {
       }
     }
 
-    // 2. Cek apakah user sedang memilih angka balasan autocomplete (1 - 5)
+    // 2. Cek apakah user sedang memilih lagu (1 - 5)
+    const pendingMusic = getMusicSelection({ platform: 'whatsapp', chatId: remoteJid, userId: sender });
+    if (pendingMusic && /^[1-5]$/.test(text)) {
+      const choiceIdx = parseInt(text, 10) - 1;
+      if (choiceIdx < 0 || choiceIdx >= pendingMusic.candidates.length) {
+        await reply(`[!] Pilih angka 1 sampai ${pendingMusic.candidates.length}.`);
+        return;
+      }
+
+      const candidate = consumeMusicSelection({
+        platform: 'whatsapp',
+        chatId: remoteJid,
+        userId: sender,
+        index: choiceIdx,
+      });
+      if (!candidate) {
+        await reply('[!] Daftar lagu sudah kedaluwarsa. Cari lagi dengan perintah .play.');
+        return;
+      }
+
+      try {
+        const track = await downloadMusicTrack(candidate.url, candidate);
+        await sendMusicAudio({ platform: 'whatsapp', sock, jid: remoteJid, track });
+      } catch (err) {
+        logger.error('Error saat mengunduh pilihan lagu WhatsApp:', err.message);
+        await reply(`[!] Gagal memutar lagu: ${err.message}`);
+      }
+      return;
+    }
+
+    // 3. Cek apakah user sedang memilih angka balasan autocomplete (1 - 5)
     if (!msg.key.fromMe || config.selfMode !== false) {
       const pendingAuto = getPendingAutocomplete(remoteJid);
       if (pendingAuto && /^[1-5]$/.test(text)) {

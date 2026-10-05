@@ -8,6 +8,7 @@ import { checkRateLimit } from './antiBan.js';
 import { incrementCommandStat, addScore, getLeaderboard, activeGames } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
 import { tebakGambarList } from '../modules/game/questions.js';
+import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, cancelMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -412,7 +413,37 @@ export async function handleTelegramMessage(bot, ctx) {
     });
     if (gameIntercepted) return;
 
-    // 2. Cek Autocomplete Selection (1 - 5)
+    // 2. Cek Music Selection (1 - 5)
+    const pendingMusic = getMusicSelection({ platform: 'telegram', chatId, userId });
+    if (pendingMusic && /^[1-5]$/.test(rawText)) {
+      const choiceIdx = parseInt(rawText, 10) - 1;
+      if (choiceIdx < 0 || choiceIdx >= pendingMusic.candidates.length) {
+        await reply(`[!] Pilih angka 1 sampai ${pendingMusic.candidates.length}.`);
+        return;
+      }
+
+      const candidate = consumeMusicSelection({
+        platform: 'telegram',
+        chatId,
+        userId,
+        index: choiceIdx,
+      });
+      if (!candidate) {
+        await reply('[!] Daftar lagu sudah kedaluwarsa. Cari lagi dengan /play.');
+        return;
+      }
+
+      try {
+        const track = await downloadMusicTrack(candidate.url, candidate);
+        await sendMusicAudio({ platform: 'telegram', ctx, sock: telegramSock, jid: chatId, track });
+      } catch (err) {
+        logger.error('[Telegram] Error saat mengunduh pilihan lagu:', err.message);
+        await reply(`[!] Gagal memutar lagu: ${err.message}`);
+      }
+      return;
+    }
+
+    // 3. Cek Autocomplete Selection (1 - 5)
     const pendingAuto = getPendingAutocomplete(chatId);
     if (pendingAuto && /^[1-5]$/.test(rawText)) {
       const choiceIdx = parseInt(rawText, 10) - 1;
@@ -551,6 +582,40 @@ export async function handleTelegramCallback(_bot, ctx) {
     const pushName = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || 'TelegramUser';
     const userId = String(user?.id || 'unknown');
     const chatId = String(ctx.chat?.id || userId);
+
+    // 0. Music search selection
+    if (data.startsWith('music_pick:')) {
+      const [, token, rawIndex] = data.split(':');
+      const index = Number.parseInt(rawIndex, 10);
+      const candidate = consumeMusicSelection({
+        token,
+        platform: 'telegram',
+        chatId,
+        userId,
+        index,
+      });
+
+      if (!candidate) {
+        await ctx.reply('[!] Pilihan lagu sudah kedaluwarsa. Cari lagi dengan /play.').catch(() => {});
+        return;
+      }
+
+      try {
+        const track = await downloadMusicTrack(candidate.url, candidate);
+        await sendMusicAudio({ platform: 'telegram', ctx, jid: chatId, track });
+      } catch (err) {
+        logger.error('[Telegram] Error saat mengunduh pilihan lagu:', err.message);
+        await ctx.reply(`[!] Gagal memutar lagu: ${err.message}`, { parse_mode: 'HTML' }).catch(() => {});
+      }
+      return;
+    }
+
+    if (data.startsWith('music_cancel:')) {
+      const [, token] = data.split(':');
+      cancelMusicSelection({ token, platform: 'telegram', chatId, userId });
+      await safeEditOrReply(ctx, '<b>[ MUSIC SEARCH ]</b>\n\nPencarian dibatalkan.', new InlineKeyboard().text('[ MENU UTAMA ]', 'menu_main'));
+      return;
+    }
 
     // 1. Menu Utama
     if (data === 'menu_main') {

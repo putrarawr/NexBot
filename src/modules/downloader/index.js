@@ -3,10 +3,26 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { InputFile } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
-import { create8BitProgressTracker } from '../../utils/progress.js';
+import {
+  create8BitProgressTracker,
+} from '../../utils/progress.js';
+import {
+  createMusicSelection,
+  downloadMusicTrack,
+  searchMusicTracks,
+  sendMusicAudio,
+} from './music-search.js';
+
+function escapeTelegramText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 const execAsync = promisify(exec);
 
@@ -114,61 +130,7 @@ export async function downloadWithYtDlp(url, options = {}) {
  * 3. Spotify Music Downloader & Search Player
  */
 export async function downloadSpotifyTrack(queryOrUrl) {
-  let searchTerm = queryOrUrl.trim();
-  let spotifyMeta = null;
-
-  // Cek apakah berupa tautan Spotify
-  if (/spotify\.com\/track\/[a-zA-Z0-9]+/i.test(searchTerm)) {
-    try {
-      const oembedRes = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(searchTerm)}`, {
-        signal: AbortSignal.timeout(8000),
-      });
-      if (oembedRes.ok) {
-        spotifyMeta = await oembedRes.json();
-        if (spotifyMeta.title) {
-          searchTerm = spotifyMeta.title;
-        }
-      }
-    } catch {}
-  }
-
-  const rand = Math.random().toString(36).slice(2, 8);
-  const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
-
-  // Target pencarian audio via SoundCloud (anti-403 & cepat), fallback ke YouTube
-  const searchTarget = searchTerm.startsWith('http') ? searchTerm : `scsearch1:${searchTerm}`;
-  const cmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" --max-filesize 35M -o "${outTemplate}" "${searchTarget}"`;
-
-  try {
-    await execAsync(cmd, { timeout: 45000 });
-  } catch (err) {
-    logger.warn('SoundCloud search failed, mencoba fallback YouTube:', err.message);
-    const ytCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" --no-warnings --no-playlist --playlist-items 1 -f "ba/b" --max-filesize 35M -o "${outTemplate}" "ytsearch1:${searchTerm}"`;
-    try {
-      await execAsync(ytCmd, { timeout: 45000 });
-    } catch (ytErr) {
-      logger.warn('YouTube fallback failed:', ytErr.message);
-      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
-    }
-  }
-
-  const files = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spot_') && f.includes(rand));
-  if (files.length === 0) {
-    throw new Error('File audio tidak ditemukan.');
-  }
-
-  const downloadedPath = path.join(os.tmpdir(), files[0]);
-  const stat = fs.statSync(downloadedPath);
-  const buffer = fs.readFileSync(downloadedPath);
-  await safeUnlink(downloadedPath);
-
-  return {
-    title: spotifyMeta?.title || searchTerm,
-    artist: spotifyMeta?.author_name || 'Spotify Audio',
-    thumbnail: spotifyMeta?.thumbnail_url || null,
-    buffer,
-    size: stat.size,
-  };
+  return downloadMusicTrack(queryOrUrl);
 }
 
 export function registerDownloaderCommands() {
@@ -337,42 +299,55 @@ export function registerDownloaderCommands() {
     category: 'downloader',
     description: 'Cari & putar lagu dari Spotify atau judul lagu favorit',
     usage: '.spotify <judul lagu / url spotify>',
-    async execute({ sock, jid, fullText, reply, prefix, ctx, platform }) {
+    async execute({ sock, jid, fullText, reply, prefix, ctx, platform, sender }) {
       const query = fullText?.trim();
       if (!query) {
         return reply(`[!] Masukkan judul lagu atau link Spotify.\nContoh: \`${prefix}play Bohemian Rhapsody\`\natau \`${prefix}spotify https://open.spotify.com/track/xxxxxx\``);
       }
 
-      const tracker = await create8BitProgressTracker({ ctx, reply, title: 'SPOTIFY' });
-
       try {
-        const track = await downloadSpotifyTrack(query);
-        await tracker.finish('MUSIC READY');
+        const isTelegram = platform === 'telegram' || Boolean(ctx?.replyWithAudio);
+        const directSpotifyUrl = /spotify\.com\/track\/[a-zA-Z0-9]+/i.test(query);
 
-        if (platform === 'telegram' && ctx?.replyWithAudio) {
-          let caption = `<b>[ SPOTIFY MUSIC PLAYER ]</b>\n\n`;
-          caption += `• Judul: <b>${track.title}</b>\n`;
-          caption += `• Artis: ${track.artist}\n`;
-          caption += `• Ukuran: ${(track.size / 1024 / 1024).toFixed(2)} MB`;
+        if (!directSpotifyUrl) {
+          const candidates = await searchMusicTracks(query, 5);
+          if (candidates.length === 0) {
+            return reply(`[!] Tidak menemukan lagu yang cocok untuk: ${query}`);
+          }
 
-          await ctx.replyWithAudio(new InputFile(track.buffer, `${track.title.slice(0, 30)}.mp3`), {
-            title: track.title,
-            performer: track.artist,
-            caption,
-            parse_mode: 'HTML',
-          });
-        } else {
-          let caption = `[SPOTIFY MUSIC PLAYER]\n\n• Judul: ${track.title}\n• Artis: ${track.artist}`;
-          await sock.sendMessage(jid, {
-            audio: track.buffer,
-            mimetype: 'audio/mpeg',
-            fileName: `${track.title}.mp3`,
-          });
-          await reply(caption);
+          const selectionPlatform = isTelegram ? 'telegram' : 'whatsapp';
+          const selectionChatId = String(jid);
+          const selectionUserId = isTelegram ? String(ctx.from?.id || 'unknown') : String(sender || jid);
+          const token = createMusicSelection(selectionPlatform, selectionChatId, selectionUserId, candidates);
+
+          if (isTelegram) {
+            let card = `<b>[ MUSIC SEARCH ]</b>\n\n<b>${escapeTelegramText(query)}</b>\n<i>Pilih lagu yang ingin diputar:</i>\n\n`;
+            candidates.forEach((candidate, index) => {
+              card += `<b>${index + 1}.</b> ${escapeTelegramText(candidate.title)}\n   <i>${escapeTelegramText(candidate.artist)}${candidate.duration ? ` • ${escapeTelegramText(candidate.duration)}` : ''}</i>\n`;
+            });
+
+            const keyboard = new InlineKeyboard();
+            candidates.forEach((_, index) => {
+              keyboard.text(String(index + 1), `music_pick:${token}:${index}`);
+              if (index % 3 === 2) keyboard.row();
+            });
+            keyboard.text('[ BATAL ]', `music_cancel:${token}`);
+            await ctx.reply(card, { parse_mode: 'HTML', reply_markup: keyboard });
+          } else {
+            let menu = `[ MUSIC SEARCH ]\n\nHasil untuk: ${query}\n\n`;
+            candidates.forEach((candidate, index) => {
+              menu += `[${index + 1}] ${candidate.title}\n    ${candidate.artist}${candidate.duration ? ` • ${candidate.duration}` : ''}\n`;
+            });
+            menu += '\nBalas dengan angka 1 sampai 5 untuk memutar lagu.';
+            await reply(menu);
+          }
+          return;
         }
+
+        const track = await downloadSpotifyTrack(query);
+        await sendMusicAudio({ platform: isTelegram ? 'telegram' : 'whatsapp', ctx, sock, jid, track });
       } catch (err) {
         logger.error('Error saat download Spotify:', err.message);
-        await tracker.fail(err.message);
         await reply(`[!] Gagal memutar lagu: ${err.message}`);
       }
     },

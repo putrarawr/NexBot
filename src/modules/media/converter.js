@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import sharp from 'sharp';
 import { logger } from '../../utils/logger.js';
 
 const execAsync = promisify(exec);
@@ -91,9 +92,6 @@ export async function stickerToPng(webpBuffer) {
 
 // 4. Quote Chat Estetik (SVG to WebP)
 export async function generateQuoteSticker(name = 'User', text = '', senderNumber = '') {
-  const inPath = getTempFilePath('svg');
-  const outPath = getTempFilePath('webp');
-
   const cleanText = String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -188,16 +186,12 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
 `;
 
   try {
-    fs.writeFileSync(inPath, svg);
-    const cmd = `ffmpeg -y -i "${inPath}" -vcodec libwebp -lossless 1 "${outPath}"`;
-    await execAsync(cmd);
-    const webpBuffer = fs.readFileSync(outPath);
-    return webpBuffer;
+    // Alpine's FFmpeg build may not include an SVG decoder. Sharp uses
+    // librsvg for the rasterization step, then encodes the final sticker as WebP.
+    return await sharp(Buffer.from(svg)).webp({ lossless: true }).toBuffer();
   } catch (err) {
     logger.error('Gagal generate Quote Sticker:', err.message);
     throw err;
-  } finally {
-    await safeUnlink(inPath, outPath);
   }
 }
 
