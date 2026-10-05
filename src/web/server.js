@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig, updateConfig } from '../config.js';
 import { getBotState, requestPairingCode, restartWhatsApp, logoutWhatsApp } from '../bot/connection.js';
+import { getTelegramBotState } from '../bot/telegram.js';
 import { getLogHistory, logEmitter, logger } from '../utils/logger.js';
 import { getStats, getLeaderboard } from '../utils/database.js';
 
@@ -72,6 +73,7 @@ export function createWebServer() {
         memoryHeapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
       },
       bot: botState,
+      telegram: getTelegramBotState(),
       config: {
         botName: config.botName,
         prefix: config.prefix,
@@ -84,6 +86,9 @@ export function createWebServer() {
         aiProvider: config.aiProvider,
         hasGroqKey: !!config.groqApiKey,
         hasGeminiKey: !!config.geminiApiKey,
+        hasTelegramToken: !!(config.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN),
+        enableWhatsApp: config.enableWhatsApp !== false,
+        enableTelegram: config.enableTelegram !== false,
       },
       stats,
     });
@@ -123,6 +128,9 @@ export function createWebServer() {
           aiProvider: newConfig.aiProvider,
           hasGroqKey: !!newConfig.groqApiKey,
           hasGeminiKey: !!newConfig.geminiApiKey,
+          hasTelegramToken: !!(newConfig.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN),
+          enableWhatsApp: newConfig.enableWhatsApp !== false,
+          enableTelegram: newConfig.enableTelegram !== false,
         },
       });
     } catch (err) {

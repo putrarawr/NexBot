@@ -56,16 +56,25 @@
             <h1 class="font-bold text-lg text-white tracking-tight" id="headerBotName">NexBot</h1>
             <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">v1.0</span>
           </div>
-          <p class="text-xs text-slate-400">WhatsApp Bot Multi-Device</p>
+          <p class="text-xs text-slate-400">Dual Engine • WhatsApp &amp; Telegram Bot</p>
         </div>
       </div>
 
       <!-- STATUS PILLS & AUTH BUTTON -->
       <div class="flex items-center space-x-3">
         <!-- Status Indicator Pill -->
-        <div id="statusBadge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
-          <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" id="statusDot"></span>
-          <span id="statusText">Memeriksa...</span>
+        <!-- WhatsApp Status Pill -->
+        <div id="statusBadge" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse" id="statusDot"></span>
+          <span class="font-bold text-[10px] text-emerald-400">WA:</span>
+          <span id="statusText">Cek...</span>
+        </div>
+
+        <!-- Telegram Status Pill -->
+        <div id="tgStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="tgStatusDot"></span>
+          <span class="font-bold text-[10px] text-sky-400">TELE:</span>
+          <span id="tgStatusText">Standby</span>
         </div>
 
         <!-- RAM Pill -->
@@ -87,7 +96,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-dark-700/60 flex space-x-2 sm:space-x-4 overflow-x-auto custom-scrollbar py-1">
       <button onclick="switchTab('connection')" id="tab-btn-connection" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-emerald-400 bg-emerald-500/10 transition flex items-center space-x-1.5 whitespace-nowrap">
         <i data-lucide="smartphone" class="w-4 h-4"></i>
-        <span>Koneksi WhatsApp</span>
+        <span>Koneksi Bot (WA &amp; Tele)</span>
       </button>
       <button onclick="switchTab('features')" id="tab-btn-features" class="tab-btn px-3 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 transition flex items-center space-x-1.5 whitespace-nowrap">
         <i data-lucide="sliders" class="w-4 h-4"></i>
@@ -231,6 +240,53 @@
           </div>
         </div>
 
+      </div>
+      <!-- Card Telegram Bot Engine -->
+      <div class="bg-dark-800 rounded-2xl border border-dark-700 p-6 shadow-sm">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+              <i data-lucide="send" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-white flex items-center space-x-2">
+                <span>Koneksi Bot Telegram</span>
+                <span id="tgCardBadge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-medium">Standby</span>
+              </h2>
+              <p class="text-xs text-slate-400 mt-0.5" id="tgCardSub">
+                Bot Telegram beroperasi menggunakan Token API resmi tanpa perlu scan QR.
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <a id="tgBotLink" href="#" target="_blank" class="hidden px-3.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-md transition flex items-center space-x-1.5">
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+              <span>Buka di Telegram</span>
+            </a>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-5 pt-5 border-t border-dark-700/60">
+          <div class="bg-dark-900/60 p-3.5 rounded-xl border border-dark-700">
+            <span class="text-[11px] text-slate-400">Username Telegram Bot</span>
+            <p class="text-sm font-bold text-sky-400 font-mono mt-0.5" id="tgUsernameDisplay">Belum Disetel</p>
+          </div>
+          <div class="bg-dark-900/60 p-3.5 rounded-xl border border-dark-700">
+            <span class="text-[11px] text-slate-400">Mode Koneksi</span>
+            <p class="text-sm font-bold text-slate-200 mt-0.5">Long Polling (Zero Config)</p>
+          </div>
+          <div class="bg-dark-900/60 p-3.5 rounded-xl border border-dark-700">
+            <span class="text-[11px] text-slate-400">Telegram Bot Token</span>
+            <p class="text-sm font-semibold text-slate-300 mt-0.5" id="tgTokenStatus">--</p>
+          </div>
+        </div>
+
+        <div class="mt-4 p-3.5 rounded-xl bg-sky-950/20 border border-sky-800/30 text-xs text-slate-300 flex items-start space-x-2.5">
+          <i data-lucide="info" class="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5"></i>
+          <div>
+            <b>Cara Mengaktifkan Bot Telegram:</b> Dapatkan token dari <a href="https://t.me/BotFather" target="_blank" class="text-sky-400 underline font-medium">@BotFather</a> di Telegram, lalu masukkan ke file <code class="bg-dark-900 px-1 py-0.5 rounded text-sky-300">.env</code> atau <i>Variables</i> Railway dengan nama <code class="bg-dark-900 px-1 py-0.5 rounded text-sky-300">TELEGRAM_BOT_TOKEN</code>.
+          </div>
+        </div>
       </div>
     </div>
 
@@ -755,6 +811,78 @@
           qrImg.classList.add('hidden');
           qrPlc.classList.remove('hidden');
           qrPlcText.textContent = status === 'connected' ? `Terkoneksi: ${data.bot.connectedNumber}` : 'Menyiapkan QR...';
+        }
+
+        // Update Telegram Status
+        if (data.telegram) {
+          const tgDot = document.getElementById('tgStatusDot');
+          const tgText = document.getElementById('tgStatusText');
+          const tgBadge = document.getElementById('tgStatusBadge');
+          const tgCardBadge = document.getElementById('tgCardBadge');
+          const tgCardSub = document.getElementById('tgCardSub');
+          const tgUsername = document.getElementById('tgUsernameDisplay');
+          const tgToken = document.getElementById('tgTokenStatus');
+          const tgLink = document.getElementById('tgBotLink');
+
+          if (tgBadge) tgBadge.classList.remove('hidden');
+
+          if (data.telegram.status === 'connected') {
+            if (tgDot) tgDot.className = 'w-2 h-2 rounded-full bg-sky-400';
+            if (tgText) {
+              tgText.textContent = `@${data.telegram.username || 'Bot'}`;
+              tgText.className = 'text-sky-300 font-semibold';
+            }
+            if (tgCardBadge) {
+              tgCardBadge.className = 'text-[11px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium';
+              tgCardBadge.textContent = 'Online';
+            }
+            if (tgCardSub) {
+              tgCardSub.textContent = `Bot Telegram aktif melayani pesan sebagai @${data.telegram.username}.`;
+            }
+            if (tgUsername) tgUsername.textContent = `@${data.telegram.username}`;
+            if (tgToken) {
+              tgToken.textContent = 'Terkonfigurasi';
+              tgToken.className = 'text-sm font-semibold text-emerald-400 mt-0.5';
+            }
+            if (tgLink && data.telegram.username) {
+              tgLink.href = `https://t.me/${data.telegram.username}`;
+              tgLink.classList.remove('hidden');
+            }
+          } else if (data.telegram.hasToken) {
+            if (tgDot) tgDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+            if (tgText) {
+              tgText.textContent = 'Menghubungkan...';
+              tgText.className = 'text-amber-300 font-semibold';
+            }
+            if (tgCardBadge) {
+              tgCardBadge.className = 'text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium';
+              tgCardBadge.textContent = 'Menghubungkan';
+            }
+            if (tgUsername) tgUsername.textContent = 'Menghubungkan...';
+            if (tgToken) {
+              tgToken.textContent = 'Terkonfigurasi';
+              tgToken.className = 'text-sm font-semibold text-emerald-400 mt-0.5';
+            }
+          } else {
+            if (tgDot) tgDot.className = 'w-2 h-2 rounded-full bg-slate-500';
+            if (tgText) {
+              tgText.textContent = 'Standby';
+              tgText.className = 'text-slate-400 font-medium';
+            }
+            if (tgCardBadge) {
+              tgCardBadge.className = 'text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-medium';
+              tgCardBadge.textContent = 'Standby (No Token)';
+            }
+            if (tgCardSub) {
+              tgCardSub.textContent = 'Isi TELEGRAM_BOT_TOKEN di .env atau Railway Variables untuk mengaktifkan.';
+            }
+            if (tgUsername) tgUsername.textContent = 'Belum Disetel';
+            if (tgToken) {
+              tgToken.textContent = 'Belum Ada Token';
+              tgToken.className = 'text-sm font-semibold text-slate-500 mt-0.5';
+            }
+            if (tgLink) tgLink.classList.add('hidden');
+          }
         }
 
         // Feature toggles sync jika belum diisi manual

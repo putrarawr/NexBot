@@ -2,7 +2,8 @@ import http from 'node:http';
 import { initConfig, getConfig } from './config.js';
 import { initDatabase } from './utils/database.js';
 import { logger } from './utils/logger.js';
-import { initWhatsApp, getBotState } from './bot/connection.js';
+import { initWhatsApp } from './bot/connection.js';
+import { initTelegram, stopTelegram } from './bot/telegram.js';
 import { messageHandler } from './bot/handler.js';
 import { createWebServer } from './web/server.js';
 
@@ -18,7 +19,7 @@ import { registerGroupCommands } from './modules/group/index.js';
 async function bootstrap() {
   console.clear?.();
   console.log('='.repeat(55));
-  console.log('       🚀 NEXBOT • WHATSAPP BOT & WEB DASHBOARD');
+  console.log('       🚀 NEXBOT • DUAL BOT (WHATSAPP & TELEGRAM) & DASHBOARD');
   console.log('='.repeat(55));
 
   // 1. Inisialisasi Konfigurasi & Database
@@ -46,17 +47,33 @@ async function bootstrap() {
     logger.info(`🔑 Password Admin Web: ${config.adminPassword}`);
   });
 
-  // 4. Inisialisasi WhatsApp Baileys Socket
-  try {
-    await initWhatsApp(messageHandler);
-  } catch (err) {
-    logger.error('Gagal menginisialisasi WhatsApp socket:', err.message);
+  // 4. Inisialisasi WhatsApp Engine (jika diaktifkan)
+  if (config.enableWhatsApp !== false) {
+    try {
+      await initWhatsApp(messageHandler);
+    } catch (err) {
+      logger.error('Gagal menginisialisasi WhatsApp socket:', err.message);
+    }
+  } else {
+    logger.info('WhatsApp Engine dinonaktifkan via konfigurasi (ENABLE_WHATSAPP=false).');
+  }
+
+  // 5. Inisialisasi Telegram Engine (jika diaktifkan dan token tersedia)
+  if (config.enableTelegram !== false && (config.telegramBotToken || process.env.TELEGRAM_BOT_TOKEN)) {
+    try {
+      await initTelegram();
+    } catch (err) {
+      logger.error('Gagal menginisialisasi Telegram bot:', err.message);
+    }
+  } else if (!config.telegramBotToken && !process.env.TELEGRAM_BOT_TOKEN) {
+    logger.info('Telegram Bot standby: Isi TELEGRAM_BOT_TOKEN di .env untuk mengaktifkan.');
   }
 
   // Graceful Shutdown
-  const handleExit = (signal) => {
+  const handleExit = async (signal) => {
     logger.warn(`Menerima sinyal ${signal}. Menutup proses...`);
     try {
+      await stopTelegram();
       server.close();
       server.closeAllConnections?.();
     } catch {}

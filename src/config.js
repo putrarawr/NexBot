@@ -28,6 +28,10 @@ const DEFAULT_CONFIG = {
   aiProvider: 'hybrid', // 'hybrid' | 'groq' | 'gemini' | 'free'
   groqApiKey: process.env.GROQ_API_KEY || '',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramOwnerId: process.env.TELEGRAM_OWNER_ID || '',
+  enableWhatsApp: process.env.ENABLE_WHATSAPP !== 'false',
+  enableTelegram: process.env.ENABLE_TELEGRAM !== 'false',
 };
 
 let activeConfig = { ...DEFAULT_CONFIG };

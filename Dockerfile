@@ -1,8 +1,10 @@
 FROM node:20-alpine
 
+# Install system packages including ffmpeg for media conversion
+RUN apk add --no-cache ffmpeg
+
 # Set working directory
 WORKDIR /app
-
 # Install dependencies
 COPY package*.json ./
 RUN npm install --omit=dev

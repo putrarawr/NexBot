@@ -18,6 +18,7 @@ import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
 import { registerGroupCommands, setAfk, getAfk, removeAfk } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { execSync } from 'node:child_process';
+import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, getTelegramBotState } from '../src/bot/telegram.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -278,6 +279,88 @@ async function runAllTests() {
     assert.equal(getAfk(userJid), undefined);
   });
 
+  // 4e. Telegram Bot Engine & Adapter
+  console.log('\n🤖 4e. Telegram Bot Engine & Multi-Platform Adapter:');
+  await test('formatTelegramHtml converts WhatsApp markdown and escapes HTML safely', () => {
+    const sample = 'Halo *Admin*! Cek `code` & _italic_ ~coret~ ```block code``` <script>';
+    const formatted = formatTelegramHtml(sample);
+    assert.ok(formatted.includes('<b>Admin</b>'), 'Should format bold');
+    assert.ok(formatted.includes('<code>code</code>'), 'Should format inline code');
+    assert.ok(formatted.includes('<i>italic</i>'), 'Should format italic');
+    assert.ok(formatted.includes('<s>coret</s>'), 'Should format strikethrough');
+    assert.ok(formatted.includes('<pre><code>block code</code></pre>'), 'Should format pre/code block');
+    assert.ok(formatted.includes('&lt;script&gt;'), 'Should escape HTML tags');
+  });
+
+  await test('createTelegramSocketAdapter routes messages to Telegram bot API', async () => {
+    const sentMessages = [];
+    const mockBot = {
+      api: {
+        sendMessage: async (destId, text, opts) => {
+          sentMessages.push({ type: 'text', destId, text, opts });
+          return { message_id: 101 };
+        },
+        sendPhoto: async (destId, photo, opts) => {
+          sentMessages.push({ type: 'photo', destId, photo, opts });
+          return { message_id: 102 };
+        },
+        sendVideo: async (destId, video, opts) => {
+          sentMessages.push({ type: 'video', destId, video, opts });
+          return { message_id: 103 };
+        },
+        sendSticker: async (destId, sticker) => {
+          sentMessages.push({ type: 'sticker', destId, sticker });
+          return { message_id: 104 };
+        },
+        sendChatAction: async (destId, action) => {
+          sentMessages.push({ type: 'action', destId, action });
+        },
+      },
+    };
+
+    const adapter = createTelegramSocketAdapter(mockBot, null, '123456');
+    await adapter.sendMessage('123456', { text: '*Halo* Dunia' });
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].type, 'text');
+    assert.ok(sentMessages[0].text.includes('<b>Halo</b>'));
+
+    await adapter.sendMessage('123456', { image: Buffer.from('fake_image'), caption: '*Foto*' });
+    assert.equal(sentMessages.length, 2);
+    assert.equal(sentMessages[1].type, 'photo');
+    assert.ok(sentMessages[1].opts.caption.includes('<b>Foto</b>'));
+
+    await adapter.sendMessage('123456', { video: Buffer.from('fake_video'), caption: 'Video' });
+    assert.equal(sentMessages.length, 3);
+    assert.equal(sentMessages[2].type, 'video');
+
+    await adapter.sendMessage('123456', { sticker: Buffer.from('fake_sticker') });
+    assert.equal(sentMessages.length, 4);
+    assert.equal(sentMessages[3].type, 'sticker');
+  });
+
+  await test('handleTelegramMessage executes /ping on Telegram context', async () => {
+    const replies = [];
+    const mockBot = {
+      api: {
+        sendMessage: async (chatId, text) => replies.push({ chatId, text }),
+        sendChatAction: async () => {},
+      },
+    };
+
+    const mockCtx = {
+      chat: { id: 987654, type: 'private' },
+      from: { id: 112233, first_name: 'Budi', username: 'budi_dev' },
+      message: { message_id: 55, text: '/ping' },
+      reply: async (text) => {
+        replies.push({ chatId: 987654, text });
+      },
+    };
+
+    await handleTelegramMessage(mockBot, mockCtx);
+    assert.ok(replies.length >= 2, 'Should receive Pong and latency replies');
+    assert.ok(replies[0].text.includes('Pong!'));
+  });
+
   // 5. Web Server & REST API Tests
   console.log('\n🌐 5. Web Server REST API & Endpoints:');
   const app = createWebServer();
@@ -320,6 +403,9 @@ async function runAllTests() {
       const data = await res.json();
       assert.ok(data.system.memoryRssMb < 250, 'RAM should be low (< 250 MB)');
       assert.ok(data.config);
+      assert.ok(data.bot);
+      assert.ok(data.telegram);
+      assert.ok(typeof data.telegram.status === 'string');
       assert.ok(data.stats);
     });
 
