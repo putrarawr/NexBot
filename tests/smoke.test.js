@@ -17,7 +17,7 @@ import { registerMediaCommands } from '../src/modules/media/index.js';
 import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
 import { registerGroupCommands, setAfk, getAfk, removeAfk, setAntilink, isAntilinkActive } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -140,7 +140,7 @@ async function runAllTests() {
       'ai', 'explain', 'summarize', 'translate', 'aiimg', 'vision',
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive', 'hd', 'contrast', 'vintage', 'noir', 'story', 'hdvid', 'filter',
-      'tts', 'tomp3', 'tourl', 'smeme',
+      'tts', 'tomp3', 'tourl', 'smeme', 'brat',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc', 'qrcode', 'ssweb', 'lirik',
       'hidetag', 'tagall', 'kick', 'add', 'promote', 'demote', 'group', 'linkgc', 'revoke', 'antilink', 'afk',
@@ -292,6 +292,10 @@ async function runAllTests() {
     const memeWebp = await generateMemeSticker(dummyJpg, 'BANGUN TIDUR', 'LANGSUNG NGODING');
     assert.ok(memeWebp.length > 50, 'Meme sticker buffer should be valid');
     assert.equal(memeWebp.subarray(8, 12).toString(), 'WEBP');
+
+    const bratWebp = await generateBratSticker('kamu nanya');
+    assert.ok(bratWebp.length > 50, 'Brat sticker buffer should be valid');
+    assert.equal(bratWebp.subarray(8, 12).toString(), 'WEBP');
   });
 
   // 4d. Group Utility & AFK Tests

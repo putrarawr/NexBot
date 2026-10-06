@@ -688,6 +688,107 @@ export function registerMediaCommands() {
       }
     },
   });
+
+  // 16. Command: Brat Sticker Generator (/brat)
+  registerCommand({
+    name: 'brat',
+    aliases: ['bratwa', 'stikerbrat', 'bratgenerator'],
+    category: 'media',
+    description: 'Membuat stiker kata-kata teks estetik latar belakang putih ala Brat',
+    usage: '/brat <kata-kata> atau balas pesan orang lain dengan /brat',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx, react }) {
+      let text = fullText?.trim();
+
+      // Cek balas pesan di WhatsApp
+      const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!text && quoted) {
+        text = quoted.conversation || quoted.extendedTextMessage?.text || '';
+      }
+
+      // Cek balas pesan di Telegram
+      if (!text && ctx?.message?.reply_to_message) {
+        text = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '';
+      }
+
+      if (!text) {
+        return reply(`[!] Masukkan kata-kata untuk stiker Brat.\nContoh: <code>${prefix}brat kamu nanya</code>\natau balas pesan seseorang dengan <code>${prefix}brat</code>.`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const bratWebp = await generateBratSticker(text);
+        await sock.sendMessage(jid, {
+          sticker: bratWebp,
+        });
+      } catch (err) {
+        logger.error('Error saat membuat stiker brat:', err.message);
+        await reply(`[!] Gagal membuat stiker Brat: ${err.message}`);
+      }
+    },
+  });
+}
+
+export async function generateBratSticker(text) {
+  const width = 512;
+  const height = 512;
+  const cleanRaw = String(text || '').trim();
+
+  const inputLines = cleanRaw.split(/\r?\n/).flatMap((line) => {
+    const words = line.trim().split(/\s+/);
+    const wrapped = [];
+    let cur = '';
+    for (const w of words) {
+      if ((cur + ' ' + w).trim().length <= 15) {
+        cur = (cur + ' ' + w).trim();
+      } else {
+        if (cur) wrapped.push(cur);
+        cur = w;
+      }
+    }
+    if (cur) wrapped.push(cur);
+    return wrapped;
+  }).filter(Boolean);
+
+  const lines = inputLines.slice(0, 8);
+  if (lines.length === 0) lines.push('brat');
+
+  let fontSize = 48;
+  if (lines.length === 1) fontSize = 56;
+  else if (lines.length === 2) fontSize = 50;
+  else if (lines.length <= 4) fontSize = 42;
+  else if (lines.length <= 6) fontSize = 34;
+  else fontSize = 28;
+
+  const maxWordLen = Math.max(...lines.map((l) => l.length));
+  if (maxWordLen > 10) {
+    const estimatedWidth = maxWordLen * (fontSize * 0.58);
+    if (estimatedWidth > 440) {
+      fontSize = Math.floor(440 / (maxWordLen * 0.58));
+    }
+  }
+
+  const lineHeight = fontSize * 1.28;
+  const totalHeight = lines.length * lineHeight;
+  const startY = (height - totalHeight) / 2 + fontSize * 0.9;
+
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const textNodes = lines.map((line, idx) => {
+    const y = startY + (idx * lineHeight);
+    return `<text x="50%" y="${y}" text-anchor="middle" fill="#000000" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="${fontSize}px" letter-spacing="-0.02em">${escapeXml(line)}</text>`;
+  }).join('\n');
+
+  const svg = `
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100%" height="100%" fill="#ffffff" rx="28" />
+      ${textNodes}
+    </svg>
+  `;
+
+  return await sharp(Buffer.from(svg))
+    .webp({ quality: 95 })
+    .toBuffer();
 }
 
 export async function generateTtsAudio(text, lang = 'id') {
