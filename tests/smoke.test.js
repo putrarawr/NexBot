@@ -35,6 +35,7 @@ import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage,
 import { registerTelegramExclusiveCommands } from '../src/modules/telegram/index.js';
 import { isCommandSupported } from '../src/bot/handler.js';
 import { registerUtilityTools } from '../src/modules/tools/index.js';
+import { registerVeriftokCommands, extractTikTokUrl, formatScoreBar } from '../src/modules/veriftok/index.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, playRpsRound } from '../src/modules/game/visual-games.js';
 let passedTests = 0;
 let failedTests = 0;
@@ -142,6 +143,7 @@ async function runAllTests() {
     registerDownloaderCommands();
     registerGroupCommands();
     registerUtilityTools();
+    registerVeriftokCommands();
 
     const expectedCommands = [
       'ping', 'clear', 'menu',
@@ -154,6 +156,7 @@ async function runAllTests() {
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc', 'qrcode', 'ssweb', 'lirik',
       'hidetag', 'tagall', 'kick', 'add', 'promote', 'demote', 'group', 'linkgc', 'revoke', 'antilink', 'afk',
+      'veriftok',
     ];
 
     for (const cmd of expectedCommands) {
@@ -678,6 +681,41 @@ async function runAllTests() {
   await test('Hybrid AI fallback returns valid answer', async () => {
     const answer = await askAI('1 + 1 berapa? Jawab hanya angka.');
     assert.ok(typeof answer === 'string' && answer.length > 0);
+  });
+
+  // 7. VerifTok TikTok Fact-Check & Anti-Hoax Engine
+  console.log('\n🛡️ 7. VerifTok TikTok Fact-Check & Anti-Hoax Engine:');
+  await test('extractTikTokUrl identifies short and standard TikTok URLs', () => {
+    assert.equal(
+      extractTikTokUrl('Tolong cek video ini https://vt.tiktok.com/ZS2xYZaBc/ bener ga min?'),
+      'https://vt.tiktok.com/ZS2xYZaBc/'
+    );
+    assert.equal(
+      extractTikTokUrl('https://www.tiktok.com/@jokowi/video/1234567890123456789'),
+      'https://www.tiktok.com/@jokowi/video/1234567890123456789'
+    );
+    assert.equal(extractTikTokUrl('bukan link tiktok http://google.com'), null);
+  });
+
+  await test('formatScoreBar generates visual retro bar for credibility scores', () => {
+    const highBar = formatScoreBar(80);
+    assert.equal(highBar, '████████░░');
+
+    const lowBar = formatScoreBar(20);
+    assert.equal(lowBar, '██░░░░░░░░');
+
+    const midBar = formatScoreBar(50);
+    assert.equal(midBar, '█████░░░░░');
+  });
+
+  await test('VerifTok command supports dual platforms (WhatsApp and Telegram)', () => {
+    const vtCmd = commands.get('veriftok');
+    assert.ok(vtCmd, 'veriftok command should be registered');
+    assert.equal(isCommandSupported(vtCmd, 'whatsapp'), true);
+    assert.equal(isCommandSupported(vtCmd, 'telegram'), true);
+    assert.ok(vtCmd.aliases.includes('vt'));
+    assert.ok(vtCmd.aliases.includes('cekfakta'));
+    assert.ok(vtCmd.aliases.includes('cekhoax'));
   });
 
   // Summary
