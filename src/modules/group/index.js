@@ -253,10 +253,10 @@ export function registerGroupCommands() {
   // 1. Command: Hidetag (.hidetag / .h)
   registerCommand({
     name: 'hidetag',
-    aliases: ['h', 'totag'],
+    aliases: ['h', 'totag', 'ghosttag'],
     category: 'group',
-    description: 'Menandai (mention) seluruh anggota grup secara senyap',
-    usage: '.hidetag <pesan>',
+    description: 'Menandai seluruh anggota grup secara senyap (otomatis terhapus)',
+    usage: '.hidetag <pesan> (tambahkan --keep jika tidak ingin dihapus)',
     platforms: ['whatsapp'],
     async execute({ sock, msg, jid, sender, fullText, reply, config }) {
       if (!jid.endsWith('@g.us')) {
@@ -264,23 +264,42 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, meta } = await checkGroupAdminPerms(sock, jid, sender, config);
+        const { isSenderAdmin, isBotAdmin, meta } = await checkGroupAdminPerms(sock, jid, sender, config);
         if (!isSenderAdmin) {
-          return reply('[!] Perintah .hidetag hanya boleh digunakan oleh Admin Grup.');
+          return reply(MSG_SENDER_NOT_ADMIN);
         }
 
+        const keepMessage = /--keep|-k\b/i.test(fullText || '');
+        let cleanText = (fullText || '').replace(/--(keep|k)\b|-k\b/gi, '').trim();
+
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        let messageText = fullText?.trim();
+        let messageText = cleanText;
         if (!messageText && quoted) {
           messageText = quoted.conversation || quoted.extendedTextMessage?.text || '';
         }
         if (!messageText) messageText = '[PENGUMUMAN GRUP]';
 
         const participants = meta.participants.map((p) => p.id);
-        await sock.sendMessage(jid, {
+        const sent = await sock.sendMessage(jid, {
           text: messageText,
           mentions: participants,
         });
+
+        // Hapus chat bot dan pesan perintah secara senyap setelah jeda 4 detik
+        if (!keepMessage) {
+          setTimeout(async () => {
+            try {
+              if (sent?.key) {
+                await sock.sendMessage(jid, { delete: sent.key }).catch(() => {});
+              }
+              if (isBotAdmin && msg?.key) {
+                await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
+              }
+            } catch (delErr) {
+              logger.debug('Gagal auto-delete pesan hidetag:', delErr?.message);
+            }
+          }, 4000);
+        }
       } catch (err) {
         logger.error('Error saat hidetag:', err.message);
         await reply(`[!] Gagal melakukan hidetag: ${err.message}`);
