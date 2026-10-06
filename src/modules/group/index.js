@@ -1,5 +1,6 @@
 import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
+import { areJidsSameUser, jidNormalizedUser } from '@whiskeysockets/baileys';
 
 // In-memory AFK store: Key = senderJid -> { reason, time, name }
 const afkStore = new Map();
@@ -71,6 +72,81 @@ export function setAntilink(jid, active) {
   else antilinkGroups.delete(jid);
 }
 
+export const MSG_SENDER_NOT_ADMIN = '[!] Perintah ini hanya dapat digunakan oleh Admin Grup.';
+export const MSG_BOT_NOT_ADMIN = `[ ⚠️ AKSES ADMIN DIBUTUHKAN ]
+
+Akun WhatsApp Bot belum berstatus *Admin* di grup ini.
+
+💡 *Cara mengaktifkan:*
+1. Buka *Info Grup* di WhatsApp
+2. Gulir ke bawah ke daftar anggota & cari kontak Bot
+3. Ketuk nama Bot > pilih *Jadikan Admin Grup*
+
+WhatsApp mewajibkan Bot menjadi Admin untuk mengelola anggota, perizinan grup, dan link undangan.`;
+
+export function matchesParticipant(p, targetJid, targetLid = null) {
+  if (!p) return false;
+
+  const targetJidNorm = targetJid ? jidNormalizedUser(targetJid) : null;
+  const targetLidNorm = targetLid ? jidNormalizedUser(targetLid) : null;
+
+  const pId = p.id || '';
+  const pJid = p.jid || '';
+  const pLid = p.lid || '';
+
+  const pIdNorm = pId ? jidNormalizedUser(pId) : '';
+  const pJidNorm = pJid ? jidNormalizedUser(pJid) : '';
+  const pLidNorm = pLid ? jidNormalizedUser(pLid) : '';
+
+  // 1. Direct or normalized string matching
+  if (targetJidNorm) {
+    if (pIdNorm === targetJidNorm || pJidNorm === targetJidNorm || pLidNorm === targetJidNorm) return true;
+    if (pId === targetJid || pJid === targetJid || pLid === targetJid) return true;
+    try {
+      if (pId && areJidsSameUser(pId, targetJid)) return true;
+      if (pJid && areJidsSameUser(pJid, targetJid)) return true;
+      if (pLid && areJidsSameUser(pLid, targetJid)) return true;
+    } catch {}
+  }
+
+  if (targetLidNorm) {
+    if (pIdNorm === targetLidNorm || pLidNorm === targetLidNorm || pJidNorm === targetLidNorm) return true;
+    if (pId === targetLid || pLid === targetLid || pJid === targetLid) return true;
+    try {
+      if (pId && areJidsSameUser(pId, targetLid)) return true;
+      if (pLid && areJidsSameUser(pLid, targetLid)) return true;
+    } catch {}
+  }
+
+  // 2. Phone number digit matching (ignoring device :1 suffix and domain)
+  if (targetJid) {
+    const targetDigits = (targetJid.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+    if (targetDigits.length >= 7) {
+      const pIdDigits = (pId.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+      const pJidDigits = (pJid.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+      if (pIdDigits === targetDigits || pJidDigits === targetDigits) return true;
+    }
+  }
+
+  // 3. LID digit matching
+  if (targetLid) {
+    const targetLidDigits = (targetLid.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+    if (targetLidDigits.length >= 7) {
+      const pIdDigits = (pId.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+      const pLidDigits = (pLid.split('@')[0] || '').split(':')[0].replace(/[^0-9]/g, '');
+      if (pIdDigits === targetLidDigits || pLidDigits === targetLidDigits) return true;
+    }
+  }
+
+  return false;
+}
+
+export function isParticipantAdminRole(p) {
+  return Boolean(
+    p && (p.admin === 'admin' || p.admin === 'superadmin' || p.admin === true || p.isAdmin === true)
+  );
+}
+
 export async function checkAntilinkMessage({ sock, jid, sender, text, msg, reply, config }) {
   if (!jid.endsWith('@g.us')) return false;
   if (!isAntilinkActive(jid)) return false;
@@ -85,14 +161,15 @@ export async function checkAntilinkMessage({ sock, jid, sender, text, msg, reply
 
   try {
     const meta = await sock.groupMetadata(jid);
-    const member = meta.participants.find((p) => p.id.replace(/[^0-9]/g, '').startsWith(senderClean));
-    const isAdmin = member && (member.admin === 'admin' || member.admin === 'superadmin');
+    const member = meta.participants?.find((p) => matchesParticipant(p, sender));
+    const isAdmin = isParticipantAdminRole(member);
     if (isAdmin) return false; // Admin bebas kirim link
 
     // Hapus pesan link jika bot adalah admin
-    const botNum = (sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
-    const botMember = meta.participants.find((p) => p.id.replace(/[^0-9]/g, '').startsWith(botNum));
-    const isBotAdmin = botMember && (botMember.admin === 'admin' || botMember.admin === 'superadmin');
+    const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
+    const botLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
+    const botMember = meta.participants?.find((p) => matchesParticipant(p, botJid, botLid));
+    const isBotAdmin = isParticipantAdminRole(botMember);
 
     if (isBotAdmin && msg?.key) {
       await sock.sendMessage(jid, { delete: msg.key }).catch(() => {});
@@ -107,28 +184,67 @@ export async function checkAntilinkMessage({ sock, jid, sender, text, msg, reply
   }
 }
 
-async function checkGroupAdminPerms(sock, jid, sender, config) {
+export async function checkGroupAdminPerms(sock, jid, sender, config) {
   const meta = await sock.groupMetadata(jid);
-  const senderClean = sender.replace(/[^0-9]/g, '');
-  const isOwner = config?.ownerNumber && senderClean.includes(config.ownerNumber.replace(/[^0-9]/g, ''));
+  const participants = meta.participants || [];
 
-  const member = meta.participants.find((p) => p.id.replace(/[^0-9]/g, '').startsWith(senderClean));
-  const isSenderAdmin = Boolean(isOwner || (member && (member.admin === 'admin' || member.admin === 'superadmin')));
+  // Bot resolution
+  const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
+  const botLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
+  const botMember = participants.find((p) => matchesParticipant(p, botJid, botLid));
+  const isBotAdmin = isParticipantAdminRole(botMember);
 
-  const botNum = (sock.user?.id || '').split(':')[0].replace(/[^0-9]/g, '');
-  const botMember = meta.participants.find((p) => p.id.replace(/[^0-9]/g, '').startsWith(botNum));
-  const isBotAdmin = Boolean(botMember && (botMember.admin === 'admin' || botMember.admin === 'superadmin'));
+  // Sender resolution
+  const senderMember = participants.find((p) => matchesParticipant(p, sender));
 
-  return { isSenderAdmin, isBotAdmin, meta };
+  // Check if sender is owner (by config.ownerNumber)
+  const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
+  let isSenderOwner = false;
+  if (ownerNum.length >= 7) {
+    if (sender && sender.replace(/[^0-9]/g, '').includes(ownerNum)) {
+      isSenderOwner = true;
+    }
+    if (senderMember) {
+      const idNum = (senderMember.id || '').replace(/[^0-9]/g, '');
+      const jidNum = (senderMember.jid || '').replace(/[^0-9]/g, '');
+      if (idNum.includes(ownerNum) || jidNum.includes(ownerNum)) {
+        isSenderOwner = true;
+      }
+    }
+  }
+
+  const isSenderAdmin = Boolean(isSenderOwner || isParticipantAdminRole(senderMember));
+
+  return { isSenderAdmin, isBotAdmin, meta, senderMember, botMember };
 }
 
-function resolveTargetJid(msg, args) {
-  const ctxInfo = msg?.message?.extendedTextMessage?.contextInfo;
-  if (ctxInfo?.participant) return ctxInfo.participant;
-  if (ctxInfo?.mentionedJid && ctxInfo.mentionedJid.length > 0) return ctxInfo.mentionedJid[0];
+export function getContextInfo(msg) {
+  const m = msg?.message;
+  if (!m) return null;
+  return (
+    m.extendedTextMessage?.contextInfo ||
+    m.imageMessage?.contextInfo ||
+    m.videoMessage?.contextInfo ||
+    m.stickerMessage?.contextInfo ||
+    m.documentMessage?.contextInfo ||
+    m.audioMessage?.contextInfo ||
+    null
+  );
+}
+
+export function resolveTargetJid(msg, args) {
+  const ctxInfo = getContextInfo(msg);
+  if (ctxInfo?.mentionedJid && ctxInfo.mentionedJid.length > 0) {
+    return jidNormalizedUser(ctxInfo.mentionedJid[0]);
+  }
+  if (ctxInfo?.participant) {
+    return jidNormalizedUser(ctxInfo.participant);
+  }
   if (args && args[0]) {
     const cleanNum = args[0].replace(/[^0-9]/g, '');
-    if (cleanNum.length >= 7) return `${cleanNum}@s.whatsapp.net`;
+    if (cleanNum.length >= 7) {
+      return `${cleanNum}@s.whatsapp.net`;
+    }
   }
   return null;
 }
@@ -224,13 +340,26 @@ export function registerGroupCommands() {
     async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
+      const target = resolveTargetJid(msg, args);
+      if (!target) {
+        return reply('[!] Format salah. Silakan tag (@user) atau balas (*reply*) pesan anggota yang ingin dikeluarkan.\nContoh: .kick @628123456789');
+      }
+
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Anda harus menjadi Admin Grup untuk menggunakan perintah ini.');
-        if (!isBotAdmin) return reply('[!] Jadikan bot sebagai Admin Grup terlebih dahulu.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
-        const target = resolveTargetJid(msg, args);
-        if (!target) return reply('[!] Tag (@user) atau balas (*reply*) pesan anggota yang ingin dikeluarkan.');
+        const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
+        const botLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
+        if (matchesParticipant({ id: target }, botJid, botLid)) {
+          return reply('[!] Bot tidak dapat mengeluarkan dirinya sendiri.');
+        }
+
+        const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
+        if (ownerNum && target.replace(/[^0-9]/g, '').includes(ownerNum)) {
+          return reply('[!] Tidak dapat mengeluarkan Owner Bot dari grup.');
+        }
 
         const targetClean = target.replace(/[^0-9]/g, '');
         await sock.groupParticipantsUpdate(jid, [target], 'remove');
@@ -252,13 +381,15 @@ export function registerGroupCommands() {
     async execute({ sock, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
+      const num = (args[0] || '').replace(/[^0-9]/g, '');
+      if (num.length < 9) {
+        return reply('[!] Masukkan nomor yang valid untuk ditambahkan.\nContoh: .add 628123456789');
+      }
+
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Anda harus menjadi Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Jadikan bot sebagai Admin Grup terlebih dahulu.');
-
-        const num = (args[0] || '').replace(/[^0-9]/g, '');
-        if (num.length < 9) return reply('[!] Masukkan nomor yang valid. Contoh: .add 628123456789');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const targetJid = `${num}@s.whatsapp.net`;
         await sock.groupParticipantsUpdate(jid, [targetJid], 'add');
@@ -280,13 +411,15 @@ export function registerGroupCommands() {
     async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
+      const target = resolveTargetJid(msg, args);
+      if (!target) {
+        return reply('[!] Format salah. Silakan tag (@user) atau balas (*reply*) pesan anggota yang ingin dijadikan Admin.\nContoh: .promote @628123456789');
+      }
+
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Bot harus menjadi Admin Grup.');
-
-        const target = resolveTargetJid(msg, args);
-        if (!target) return reply('[!] Tag atau balas pesan anggota yang ingin dipromosikan.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         await sock.groupParticipantsUpdate(jid, [target], 'promote');
         await reply(`[+] Selamat! @${target.replace(/[^0-9]/g, '')} sekarang adalah Admin Grup.`, { mentions: [target] });
@@ -307,13 +440,26 @@ export function registerGroupCommands() {
     async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
+      const target = resolveTargetJid(msg, args);
+      if (!target) {
+        return reply('[!] Format salah. Silakan tag (@user) atau balas (*reply*) pesan admin yang ingin diturunkan jabatannya.\nContoh: .demote @628123456789');
+      }
+
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Bot harus menjadi Admin Grup.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
-        const target = resolveTargetJid(msg, args);
-        if (!target) return reply('[!] Tag atau balas pesan admin yang ingin diturunkan jabatannya.');
+        const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
+        const botLid = sock.user?.lid || sock.authState?.creds?.me?.lid || null;
+        if (matchesParticipant({ id: target }, botJid, botLid)) {
+          return reply('[!] Bot tidak dapat menurunkan jabatan dirinya sendiri.');
+        }
+
+        const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
+        if (ownerNum && target.replace(/[^0-9]/g, '').includes(ownerNum)) {
+          return reply('[!] Tidak dapat menurunkan jabatan Owner Bot.');
+        }
 
         await sock.groupParticipantsUpdate(jid, [target], 'demote');
         await reply(`[+] @${target.replace(/[^0-9]/g, '')} telah diturunkan menjadi anggota biasa.`, { mentions: [target] });
@@ -334,20 +480,22 @@ export function registerGroupCommands() {
     async execute({ sock, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
+      const action = (args[0] || '').toLowerCase();
+      if (!action || !['open', 'buka', 'close', 'tutup'].includes(action)) {
+        return reply('[!] Format salah. Gunakan:\n• .group open (Buka grup untuk semua anggota)\n• .group close (Tutup grup hanya untuk admin)');
+      }
+
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Bot harus menjadi Admin Grup.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
-        const action = (args[0] || '').toLowerCase();
         if (action === 'open' || action === 'buka') {
           await sock.groupSettingUpdate(jid, 'not_announcement');
           await reply('[+] Grup telah dibuka. Seluruh anggota sekarang dapat mengirim pesan.');
-        } else if (action === 'close' || action === 'tutup') {
+        } else {
           await sock.groupSettingUpdate(jid, 'announcement');
           await reply('[+] Grup telah ditutup. Hanya Admin Grup yang dapat mengirim pesan.');
-        } else {
-          await reply('[!] Format salah. Gunakan:\n• .group open (Buka grup)\n• .group close (Tutup grup)');
         }
       } catch (err) {
         await reply(`[!] Gagal mengubah setelan grup: ${err.message}`);
@@ -368,11 +516,11 @@ export function registerGroupCommands() {
 
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Bot harus menjadi Admin Grup.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const code = await sock.groupInviteCode(jid);
-        await reply(`[ LINK UNDANGAN GRUP ]\n\nhttps://chat.whatsapp.com/${code}`);
+        await reply(`[ 🔗 LINK UNDANGAN GRUP ]\n\nhttps://chat.whatsapp.com/${code}`);
       } catch (err) {
         await reply(`[!] Gagal mengambil link grup: ${err.message}`);
       }
@@ -391,8 +539,8 @@ export function registerGroupCommands() {
 
       try {
         const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
-        if (!isBotAdmin) return reply('[!] Bot harus menjadi Admin Grup.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const newCode = await sock.groupRevokeInvite(jid);
         await reply(`[+] Link undangan grup berhasil direset.\n\nLink baru: https://chat.whatsapp.com/${newCode}`);
@@ -415,7 +563,7 @@ export function registerGroupCommands() {
 
       try {
         const { isSenderAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply('[!] Khusus Admin Grup.');
+        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
 
         const mode = (args[0] || '').toLowerCase();
         if (mode === 'on' || mode === 'aktif' || mode === '1') {

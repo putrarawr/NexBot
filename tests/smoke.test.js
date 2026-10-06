@@ -15,7 +15,17 @@ import { registerAiCommands } from '../src/modules/ai/index.js';
 import { registerProgrammingCommands } from '../src/modules/programming/index.js';
 import { registerMediaCommands } from '../src/modules/media/index.js';
 import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
-import { registerGroupCommands, setAfk, getAfk, removeAfk, setAntilink, isAntilinkActive } from '../src/modules/group/index.js';
+import {
+  registerGroupCommands,
+  setAfk,
+  getAfk,
+  removeAfk,
+  setAntilink,
+  isAntilinkActive,
+  matchesParticipant,
+  checkGroupAdminPerms,
+  resolveTargetJid,
+} from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { generateMemeSticker, generateBratSticker } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
@@ -319,6 +329,79 @@ async function runAllTests() {
     assert.equal(isAntilinkActive(groupJid), true);
     setAntilink(groupJid, false);
     assert.equal(isAntilinkActive(groupJid), false);
+  });
+
+  await test('matchesParticipant and checkGroupAdminPerms accurately detect LID and admin status', async () => {
+    // 1. Participant matching with LID
+    const lidParticipant = {
+      id: '123456789012345@lid',
+      lid: '123456789012345@lid',
+      admin: 'admin',
+    };
+    assert.ok(matchesParticipant(lidParticipant, null, '123456789012345@lid'));
+    assert.ok(matchesParticipant(lidParticipant, '123456789012345@lid'));
+
+    const phoneParticipant = {
+      id: '628111222333@s.whatsapp.net',
+      admin: 'admin',
+    };
+    assert.ok(matchesParticipant(phoneParticipant, '628111222333:4@s.whatsapp.net'));
+
+    // 2. checkGroupAdminPerms with bot as LID and sender as phone admin
+    const mockSock = {
+      user: {
+        id: '628999888777:0@s.whatsapp.net',
+        lid: '999888777666@lid',
+      },
+      groupMetadata: async () => ({
+        id: '12345@g.us',
+        participants: [
+          { id: '999888777666@lid', admin: 'admin' }, // Bot as LID admin
+          { id: '628123456789@s.whatsapp.net', admin: 'admin' }, // User sender as admin
+          { id: '628777888999@s.whatsapp.net', admin: null }, // Regular member
+        ],
+      }),
+    };
+
+    const permsAdmin = await checkGroupAdminPerms(
+      mockSock,
+      '12345@g.us',
+      '628123456789@s.whatsapp.net',
+      { ownerNumber: '628000000000' }
+    );
+    assert.equal(permsAdmin.isBotAdmin, true, 'Bot with LID in group should be detected as admin');
+    assert.equal(permsAdmin.isSenderAdmin, true, 'Admin sender should be detected as admin');
+
+    const permsMember = await checkGroupAdminPerms(
+      mockSock,
+      '12345@g.us',
+      '628777888999@s.whatsapp.net',
+      { ownerNumber: '628000000000' }
+    );
+    assert.equal(permsMember.isSenderAdmin, false, 'Regular member should NOT be sender admin');
+    assert.equal(permsMember.isBotAdmin, true, 'Bot remains admin');
+
+    // 3. resolveTargetJid
+    const msgWithMention = {
+      message: {
+        extendedTextMessage: {
+          contextInfo: { mentionedJid: ['628555444333@s.whatsapp.net'] },
+        },
+      },
+    };
+    assert.equal(resolveTargetJid(msgWithMention, []), '628555444333@s.whatsapp.net');
+
+    const msgWithQuoted = {
+      message: {
+        extendedTextMessage: {
+          contextInfo: { participant: '628111222333:2@s.whatsapp.net' },
+        },
+      },
+    };
+    assert.equal(resolveTargetJid(msgWithQuoted, []), '628111222333@s.whatsapp.net');
+
+    const rawNum = resolveTargetJid(null, ['081234567890']);
+    assert.equal(rawNum, '081234567890@s.whatsapp.net');
   });
 
   // 4e. Telegram Bot Engine & Adapter
