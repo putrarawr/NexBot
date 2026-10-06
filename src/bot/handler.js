@@ -4,7 +4,7 @@ import { checkRateLimit, createReplyHelper, isBotSentMessage, reactWait } from '
 import { checkGroupSpamKick } from './antiSpamKick.js';
 import { incrementCommandStat } from '../utils/database.js';
 import { handleGameInput } from '../modules/game/index.js';
-import { handleAfkInteractions } from '../modules/group/index.js';
+import { handleAfkInteractions, checkAntilinkMessage } from '../modules/group/index.js';
 import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
 import {
   findSuggestions,
@@ -108,6 +108,22 @@ export async function messageHandler(sock, chatUpdate) {
         config,
       });
       if (isSpamIntercepted) {
+        return;
+      }
+    }
+
+    // Anti-Link WhatsApp Group Protection
+    if (isGroup && !msg.key.fromMe) {
+      const isAntilink = await checkAntilinkMessage({
+        sock,
+        jid: remoteJid,
+        sender,
+        text,
+        msg,
+        reply,
+        config,
+      });
+      if (isAntilink) {
         return;
       }
     }
@@ -337,45 +353,139 @@ registerCommand({
   },
 });
 
+function formatBotUptime(seconds) {
+  const d = Math.floor(seconds / (3600 * 24));
+  const h = Math.floor((seconds % (3600 * 24)) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const res = [];
+  if (d > 0) res.push(`${d}h`);
+  if (h > 0) res.push(`${h}j`);
+  if (m > 0) res.push(`${m}m`);
+  res.push(`${s}d`);
+  return res.join(' ');
+}
+
 registerCommand({
   name: 'menu',
   aliases: ['help', 'bantuan'],
   category: 'general',
   description: 'Menampilkan seluruh daftar menu & perintah bot',
-  usage: '.menu',
-  async execute({ reply, config, prefix, pushName }) {
+  usage: '.menu [kategori]',
+  async execute({ sender, args, reply, config, prefix, pushName }) {
     const categories = getCommandsByCategory('whatsapp');
-    const categoryHeaders = {
-      media: 'MEDIA, STIKER & FOTO HD',
-      downloader: 'SOCIAL MEDIA DOWNLOADER',
-      info: 'INFORMASI CUACA, GEMPA & WIKIPEDIA',
-      islami: 'ISLAMI & JADWAL SHOLAT',
-      utility: 'TOOLS & UTILITY',
-      group: 'GRUP & MANAJEMEN',
-      game: 'GAME & KUIS',
-      osint: 'OSINT & NETWORK',
-      ai: 'ARTIFICIAL INTELLIGENCE',
-      programming: 'PEMROGRAMAN & DEV TOOLS',
-      general: 'UTILITY & UMUM',
+    const categoryIcons = {
+      ai: '🤖',
+      media: '🎨',
+      downloader: '📥',
+      group: '👥',
+      game: '🎮',
+      tools: '🧰',
+      utility: '🧰',
+      info: '🌍',
+      islami: '🕌',
+      osint: '🔍',
+      programming: '💻',
+      general: '⚙️',
     };
 
-    let menuText = `Halo *${pushName}*!\n`;
-    menuText += `Selamat datang di *${config.botName || 'NexBot'}*\n`;
-    menuText += `Prefix aktif: \`${prefix}\` atau \`/\`\n\n`;
+    const categoryHeaders = {
+      ai: 'ARTIFICIAL INTELLIGENCE (AI)',
+      media: 'MEDIA, STIKER & ENHANCER HD',
+      downloader: 'SOSMED DOWNLOADER',
+      group: 'GRUP & MODERASI',
+      game: 'GAME & KUIS INTERAKTIF',
+      utility: 'UTILITY & TOOLS',
+      info: 'INFORMASI CUACA & GEMPA',
+      islami: 'ISLAMI & JADWAL SHOLAT',
+      osint: 'OSINT & NETWORK TOOLS',
+      programming: 'PEMROGRAMAN & DEV',
+      general: 'PENGATURAN & UMUM',
+    };
+
+    const senderClean = sender ? sender.replace(/[^0-9]/g, '') : '';
+    const isOwner = Boolean(config.ownerNumber && senderClean.includes(config.ownerNumber.replace(/[^0-9]/g, '')));
+    const filterCat = args[0]?.toLowerCase();
+
+    // 1. Tampilan Sub-Menu Spesifik Kategori jika diminta user
+    if (filterCat && (categories[filterCat] || filterCat === 'tools')) {
+      const targetCat = filterCat === 'tools' ? 'utility' : filterCat;
+      const list = categories[targetCat] || [];
+      const icon = categoryIcons[targetCat] || '📌';
+      const header = categoryHeaders[targetCat] || targetCat.toUpperCase();
+
+      let text = `╔══════════════════════════════════╗\n`;
+      text += `   ${icon}  *${header}*\n`;
+      text += `╚══════════════════════════════════╝\n\n`;
+
+      for (const item of list) {
+        text += `• *${prefix}${item.name}*\n`;
+        if (item.description) text += `  _${item.description}_\n`;
+        if (item.usage) text += `  Format: \`${item.usage}\`\n\n`;
+      }
+      text += `_Ketik \`${prefix}menu\` untuk kembali ke dashboard utama._`;
+      return await reply(text.trim());
+    }
+
+    // 2. Tampilan Dashboard Utama Full Menu
+    const now = new Date();
+    const timeStr = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(now);
+    const dateStr = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(now);
+
+    let totalCmds = 0;
+    for (const list of Object.values(categories)) {
+      totalCmds += list.length;
+    }
+
+    let menuText = `╔══════════════════════════════════╗\n`;
+    menuText += `   ⚡  *N E X B O T  •  D A S H B O A R D*  ⚡\n`;
+    menuText += `╚══════════════════════════════════╝\n\n`;
+
+    menuText += `┌──「 👤 *PROFIL PENGGUNA* 」\n`;
+    menuText += `│ • *Nama:* ${pushName}\n`;
+    menuText += `│ • *Role:* ${isOwner ? '👑 Owner Bot' : '👥 Pengguna'}\n`;
+    menuText += `│ • *Prefix Aktif:* [ ${prefix} ] dan [ / ]\n`;
+    menuText += `└───────────────────────────\n\n`;
+
+    menuText += `┌──「 ⚙️ *TELEMETRI SISTEM* 」\n`;
+    menuText += `│ • *Runtime:* ${formatBotUptime(process.uptime())}\n`;
+    menuText += `│ • *Waktu:* ${timeStr} WIB (${dateStr})\n`;
+    menuText += `│ • *Library:* Dual-Engine (Baileys & Grammy)\n`;
+    menuText += `│ • *Total Fitur:* ${totalCmds} Perintah Aktif\n`;
+    menuText += `└───────────────────────────\n\n`;
+
+    menuText += `_Ketik \`${prefix}menu <kategori>\` untuk filter cepat:_\n`;
+    menuText += `_${prefix}menu ai  •  ${prefix}menu media  •  ${prefix}menu group  •  ${prefix}menu game_\n\n`;
 
     for (const [cat, list] of Object.entries(categories)) {
+      const icon = categoryIcons[cat] || '📌';
       const header = categoryHeaders[cat] || cat.toUpperCase();
       const isEnabled = config.features && config.features[cat] !== false;
       const statusTag = isEnabled ? '' : ' (Nonaktif)';
 
-      menuText += `[ ${header}${statusTag} ]\n`;
+      menuText += `┌──「 ${icon} *${header}${statusTag}* 」\n`;
       for (const item of list) {
-        menuText += `- ${prefix}${item.name} : ${item.description}\n`;
+        menuText += `│ • *${prefix}${item.name}* : ${item.description}\n`;
       }
-      menuText += `\n`;
+      menuText += `└───────────────────────────\n\n`;
     }
 
-    menuText += `Tips: Ketik ${prefix}<perintah> atau /<perintah> untuk menjalankan fitur.`;
+    menuText += `╔══════════════════════════════════╗\n`;
+    menuText += `   Tips: Balas media dengan perintah\n`;
+    menuText += `   seperti .s, .hd, .story, atau .toimg\n`;
+    menuText += `╚══════════════════════════════════╝`;
+
     await reply(menuText.trim());
   },
 });

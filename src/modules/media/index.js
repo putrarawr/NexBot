@@ -1,6 +1,11 @@
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execSync } from 'node:child_process';
+import sharp from 'sharp';
 import {
   imageToWebpSticker,
   videoToWebpSticker,
@@ -18,7 +23,7 @@ import {
 } from './enhancer.js';
 import { InlineKeyboard } from 'grammy';
 
-async function extractPhotoBuffer({ msg, ctx, platform }) {
+export async function extractPhotoBuffer({ msg, ctx, platform }) {
   if (platform === 'telegram' && ctx) {
     const target = ctx.message?.reply_to_message || ctx.message;
     if (target?.photo && target.photo.length > 0) {
@@ -56,7 +61,7 @@ async function extractPhotoBuffer({ msg, ctx, platform }) {
   return null;
 }
 
-async function extractVideoBuffer({ msg, ctx, platform }) {
+export async function extractVideoBuffer({ msg, ctx, platform }) {
   if (platform === 'telegram' && ctx) {
     const target = ctx.message?.reply_to_message || ctx.message;
     const vid = target?.video || target?.animation;
@@ -525,4 +530,291 @@ export function registerMediaCommands() {
       await reply('[DASHBOARD FILTER FOTO & VIDEO HD]\n\nBalas foto/video dengan perintah:\n- .hd (Pertajam resolusi)\n- .story (Buat video story 9:16)\n- .contrast (Tingkatkan kontras)\n- .vintage (Warna retro film)\n- .noir (Hitam putih sinematik)\n- .hdvid (Tingkatkan kejernihan video)');
     },
   });
+
+  // 12. Command: Text-to-Speech (/tts)
+  registerCommand({
+    name: 'tts',
+    aliases: ['gtts', 'suara', 'speak'],
+    category: 'media',
+    description: 'Mengubah teks menjadi suara Voice Note berbahasa Indonesia',
+    usage: '/tts <teks> atau balas pesan dengan /tts',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx, react }) {
+      let textToSpeak = fullText?.trim();
+      const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!textToSpeak && quoted) {
+        textToSpeak = quoted.conversation || quoted.extendedTextMessage?.text || '';
+      }
+      if (!textToSpeak && ctx?.message?.reply_to_message) {
+        textToSpeak = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '';
+      }
+
+      if (!textToSpeak) {
+        return reply(`[!] Masukkan teks yang ingin diubah menjadi suara.\nContoh: <code>${prefix}tts Halo selamat pagi semuanya</code>`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const audioBuffer = await generateTtsAudio(textToSpeak, 'id');
+        await sock.sendMessage(jid, {
+          audio: audioBuffer,
+          mimetype: 'audio/mp4',
+          ptt: true,
+        });
+      } catch (err) {
+        logger.error('Error saat TTS:', err.message);
+        await reply(`[!] Gagal membuat audio TTS: ${err.message}`);
+      }
+    },
+  });
+
+  // 13. Command: Convert Media to Audio/Voice Note (/tomp3 / /vn)
+  registerCommand({
+    name: 'tomp3',
+    aliases: ['toaudio', 'vn'],
+    category: 'media',
+    description: 'Mengubah video atau audio menjadi Voice Note / MP3',
+    usage: '/tomp3 [balas video atau audio]',
+    async execute({ sock, msg, jid, reply, prefix, ctx, platform, react, command }) {
+      const isPtt = command.toLowerCase() === 'vn';
+      const videoBuffer = await extractVideoBuffer({ msg, ctx, platform });
+
+      let sourceBuffer = videoBuffer;
+      if (!sourceBuffer) {
+        if (platform === 'telegram' && ctx) {
+          const target = ctx.message?.reply_to_message || ctx.message;
+          const aud = target?.audio || target?.voice;
+          if (aud) {
+            const file = await ctx.api.getFile(aud.file_id);
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+            sourceBuffer = Buffer.from(await res.arrayBuffer());
+          }
+        } else {
+          const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+          if (quoted?.audioMessage) {
+            const fakeMsg = { key: { id: msg?.message?.extendedTextMessage?.contextInfo?.stanzaId }, message: quoted };
+            sourceBuffer = await downloadMediaMessage(fakeMsg, 'buffer', {});
+          }
+        }
+      }
+
+      if (!sourceBuffer) {
+        return reply(`[!] Balas (*reply*) video atau rekaman audio dengan <code>${prefix}tomp3</code> atau <code>${prefix}vn</code>.`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const converted = await convertMediaToAudio(sourceBuffer, isPtt);
+        await sock.sendMessage(jid, {
+          audio: converted,
+          mimetype: isPtt ? 'audio/ogg; codecs=opus' : 'audio/mp4',
+          ptt: isPtt,
+        });
+      } catch (err) {
+        logger.error('Error saat konversi audio:', err.message);
+        await reply(`[!] Gagal mengonversi ke audio: ${err.message}`);
+      }
+    },
+  });
+
+  // 14. Command: Media to URL (/tourl)
+  registerCommand({
+    name: 'tourl',
+    aliases: ['upload', 'url'],
+    category: 'media',
+    description: 'Mengunggah foto, video, audio, atau stiker ke CDN publik untuk mendapatkan link langsung',
+    usage: '/tourl [balas media]',
+    async execute({ msg, reply, prefix, ctx, platform, react }) {
+      const media = await extractAnyMediaBuffer({ msg, ctx, platform });
+      if (!media) {
+        return reply(`[!] Balas foto, video, audio, atau stiker dengan <code>${prefix}tourl</code> untuk mendapatkan link publik.`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const fileName = `nexbot_${Date.now()}.${media.ext}`;
+        const uploaded = await uploadToTmpfiles(media.buffer, fileName);
+
+        const sizeKb = (media.buffer.length / 1024).toFixed(1);
+        let resp = `<b>[ 🌐 MEDIA URL GENERATOR ]</b>\n\n`;
+        resp += `• <b>Direct Link:</b> ${uploaded.directUrl}\n`;
+        resp += `• <b>Halaman Unduh:</b> ${uploaded.pageUrl}\n`;
+        resp += `• <b>Format:</b> ${media.ext.toUpperCase()} (${sizeKb} KB)\n`;
+        resp += `• <b>Masa Aktif:</b> Siap diakses & diunduh siapa saja`;
+
+        await reply(resp);
+      } catch (err) {
+        logger.error('Error saat upload tourl:', err.message);
+        await reply(`[!] Gagal mengunggah media: ${err.message}`);
+      }
+    },
+  });
+
+  // 15. Command: Sticker Meme Generator (/smeme)
+  registerCommand({
+    name: 'smeme',
+    aliases: ['stickermeme', 'memesticker'],
+    category: 'media',
+    description: 'Membuat stiker meme dengan teks atas dan bawah dari foto',
+    usage: '/smeme teks atas | teks bawah [balas foto / kirim foto]',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx, platform, react }) {
+      const photoBuffer = await extractPhotoBuffer({ msg, ctx, platform });
+      if (!photoBuffer) {
+        return reply(`[!] Format salah. Balas foto atau kirim foto dengan caption:\n<code>${prefix}smeme teks atas | teks bawah</code>`);
+      }
+
+      const rawText = fullText?.trim() || '';
+      const [topText = '', bottomText = ''] = rawText.includes('|')
+        ? rawText.split('|').map((s) => s.trim())
+        : [rawText, ''];
+
+      if (!topText && !bottomText) {
+        return reply(`[!] Masukkan teks meme. Pisahkan teks atas dan bawah dengan tanda <code>|</code>.\nContoh: <code>${prefix}smeme bangun tidur | langsung ngoding</code>`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const memeWebp = await generateMemeSticker(photoBuffer, topText, bottomText);
+        await sock.sendMessage(jid, {
+          sticker: memeWebp,
+        });
+      } catch (err) {
+        logger.error('Error saat generate smeme:', err.message);
+        await reply(`[!] Gagal membuat stiker meme: ${err.message}`);
+      }
+    },
+  });
+}
+
+export async function generateTtsAudio(text, lang = 'id') {
+  const cleanText = text.trim().slice(0, 300);
+  const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)',
+    },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`Google TTS merespon HTTP ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+export async function convertMediaToAudio(inputBuffer, isPtt = false) {
+  const rand = Math.random().toString(36).slice(2, 8);
+  const inExt = isPtt ? 'ogg' : 'mp3';
+  const inPath = path.join(os.tmpdir(), `nex_audin_${Date.now()}_${rand}.bin`);
+  const outPath = path.join(os.tmpdir(), `nex_audout_${Date.now()}_${rand}.${inExt}`);
+
+  try {
+    fs.writeFileSync(inPath, inputBuffer);
+    const audioArgs = isPtt
+      ? '-vn -c:a libopus -b:a 64k -ar 48000'
+      : '-vn -c:a libmp3lame -b:a 128k -ar 44100';
+    execSync(`ffmpeg -y -i "${inPath}" ${audioArgs} "${outPath}"`, { timeout: 30000 });
+    return fs.readFileSync(outPath);
+  } finally {
+    try { if (fs.existsSync(inPath)) fs.unlinkSync(inPath); } catch {}
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch {}
+  }
+}
+
+export async function uploadToTmpfiles(buffer, fileName = 'file.bin') {
+  const form = new FormData();
+  form.append('file', new Blob([buffer]), fileName);
+
+  const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(20000),
+  });
+
+  if (!res.ok) throw new Error(`Tmpfiles server merespon status ${res.status}`);
+  const json = await res.json();
+  const rawUrl = json.data?.url;
+  if (!rawUrl) throw new Error('Gagal mendapatkan tautan dari Tmpfiles.');
+
+  const directUrl = rawUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+  return { pageUrl: rawUrl, directUrl };
+}
+
+export async function generateMemeSticker(imageBuffer, topText = '', bottomText = '') {
+  const width = 512;
+  const height = 512;
+
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const cleanTop = escapeXml(topText.toUpperCase().slice(0, 60));
+  const cleanBottom = escapeXml(bottomText.toUpperCase().slice(0, 60));
+
+  const svg = `
+    <svg width="${width}" height="${height}">
+      <style>
+        .meme-text {
+          fill: #ffffff;
+          stroke: #000000;
+          stroke-width: 3.5px;
+          paint-order: stroke fill;
+          font-family: Impact, sans-serif;
+          font-size: 38px;
+          font-weight: 900;
+          text-anchor: middle;
+        }
+      </style>
+      <text x="50%" y="65" class="meme-text">${cleanTop}</text>
+      <text x="50%" y="465" class="meme-text">${cleanBottom}</text>
+    </svg>
+  `;
+
+  const resized = await sharp(imageBuffer)
+    .resize(width, height, { fit: 'cover' })
+    .png()
+    .toBuffer();
+
+  const composite = await sharp(resized)
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+
+  return await imageToWebpSticker(composite);
+}
+
+export async function extractAnyMediaBuffer({ msg, ctx, platform }) {
+  const photo = await extractPhotoBuffer({ msg, ctx, platform });
+  if (photo) return { buffer: photo, ext: 'jpg', mime: 'image/jpeg' };
+
+  const video = await extractVideoBuffer({ msg, ctx, platform });
+  if (video) return { buffer: video, ext: 'mp4', mime: 'video/mp4' };
+
+  if (platform === 'telegram' && ctx) {
+    const target = ctx.message?.reply_to_message || ctx.message;
+    if (target?.sticker) {
+      const file = await ctx.api.getFile(target.sticker.file_id);
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+      return { buffer: Buffer.from(await res.arrayBuffer()), ext: 'webp', mime: 'image/webp' };
+    }
+    if (target?.audio || target?.voice) {
+      const aud = target.audio || target.voice;
+      const file = await ctx.api.getFile(aud.file_id);
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+      return { buffer: Buffer.from(await res.arrayBuffer()), ext: 'ogg', mime: 'audio/ogg' };
+    }
+  } else {
+    let quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (quoted?.stickerMessage) {
+      const fakeMsg = { key: { id: msg?.message?.extendedTextMessage?.contextInfo?.stanzaId }, message: quoted };
+      const buf = await downloadMediaMessage(fakeMsg, 'buffer', {});
+      return { buffer: buf, ext: 'webp', mime: 'image/webp' };
+    }
+    if (quoted?.audioMessage) {
+      const fakeMsg = { key: { id: msg?.message?.extendedTextMessage?.contextInfo?.stanzaId }, message: quoted };
+      const buf = await downloadMediaMessage(fakeMsg, 'buffer', {});
+      return { buffer: buf, ext: 'mp3', mime: 'audio/mp4' };
+    }
+  }
+  return null;
 }

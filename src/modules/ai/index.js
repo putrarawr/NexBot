@@ -1,6 +1,7 @@
 import { registerCommand } from '../../bot/handler.js';
 import { getConfig } from '../../config.js';
 import { logger } from '../../utils/logger.js';
+import { extractPhotoBuffer } from '../media/index.js';
 
 export async function askAI(prompt, systemInstruction = '', options = {}) {
   const config = getConfig();
@@ -218,4 +219,117 @@ export function registerAiCommands() {
       }
     },
   });
+
+  // 5. Text-to-Image AI Generator (/aiimg / /txt2img)
+  registerCommand({
+    name: 'aiimg',
+    aliases: ['txt2img', 'imagine', 'diffusion', 'draw'],
+    category: 'ai',
+    description: 'Menghasilkan gambar ilustrasi AI dari prompt teks',
+    usage: '/aiimg <deskripsi gambar>',
+    async execute({ sock, jid, fullText, reply, prefix, react }) {
+      const prompt = fullText?.trim();
+      if (!prompt) {
+        return reply(`[!] Masukkan deskripsi gambar yang ingin dibuat.\nContoh: <code>${prefix}aiimg cybernetic cat in neon tokyo street cinematic 4k</code>`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const imageBuffer = await generateAiImage(prompt);
+        await sock.sendMessage(jid, {
+          image: imageBuffer,
+          caption: `<b>[ AI IMAGE GENERATOR ]</b>\n\nPrompt: <i>${prompt}</i>`,
+        });
+      } catch (err) {
+        logger.error('Error saat generate AI image:', err.message);
+        await reply(`[!] Gagal membuat gambar AI: ${err.message}`);
+      }
+    },
+  });
+
+  // 6. AI Vision / Analisis Gambar (/vision)
+  registerCommand({
+    name: 'vision',
+    aliases: ['tanyafoto', 'analisafoto', 'aivision'],
+    category: 'ai',
+    description: 'Menganalisis foto dan menjawab pertanyaan seputar gambar via AI Vision',
+    usage: '/vision <pertanyaan> [balas foto / kirim foto]',
+    async execute({ msg, fullText, reply, prefix, ctx, platform, react }) {
+      const photoBuffer = await extractPhotoBuffer({ msg, ctx, platform });
+      if (!photoBuffer) {
+        return reply(`[!] Format salah. Balas foto atau kirim foto dengan caption <code>${prefix}vision <pertanyaan></code>.`);
+      }
+
+      const question = fullText?.trim() || 'Jelaskan gambar ini secara detail dan sebutkan objek apa saja yang ada di dalamnya.';
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const answer = await askAiVision(photoBuffer, question);
+        await reply(`<b>[ AI VISION ANALYSIS ]</b>\n\n${answer}`);
+      } catch (err) {
+        logger.error('Error saat AI Vision:', err.message);
+        await reply(`[!] Gagal menganalisis gambar: ${err.message}`);
+      }
+    },
+  });
+}
+
+export async function generateAiImage(prompt) {
+  const cleanPrompt = prompt.trim().slice(0, 400);
+  const seed = Math.floor(Math.random() * 1000000);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?nologo=1&seed=${seed}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`Server AI image merespon status ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 500) throw new Error('Gambar yang dihasilkan kosong atau tidak valid.');
+  return buf;
+}
+
+export async function askAiVision(imageBuffer, question = 'Jelaskan gambar ini secara detail') {
+  const config = getConfig();
+  const geminiKey = config.geminiApiKey || process.env.GEMINI_API_KEY;
+
+  if (geminiKey) {
+    try {
+      const b64 = imageBuffer.toString('base64');
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: `Kamu adalah asisten visual AI yang cerdas. Jawab pertanyaan berikut mengenai gambar dalam bahasa Indonesia yang ringkas, jelas, dan akurat tanpa emoji: ${question}` },
+                {
+                  inlineData: {
+                    mimeType: 'image/jpeg',
+                    data: b64,
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(25000),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) return text.trim();
+      }
+    } catch (err) {
+      logger.warn('Gemini vision API error:', err.message);
+    }
+  }
+
+  // Fallback hybrid explanation
+  return await askAI(`Pengguna menanyakan: "${question}" terkait gambar yang dikirimkan. Berikan jawaban informatif mengenai topik tersebut dan jelaskan cara mengatur GEMINI_API_KEY untuk analisis visual langsung.`);
 }

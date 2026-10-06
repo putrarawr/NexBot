@@ -326,4 +326,125 @@ export function registerUtilityTools() {
       }
     },
   });
+
+  // 8. Command: QR Code Generator (/qrcode)
+  registerCommand({
+    name: 'qrcode',
+    aliases: ['qr', 'makeqr'],
+    category: 'utility',
+    description: 'Membuat kode QR dari teks atau tautan URL secara instan',
+    usage: '/qrcode <teks/url>',
+    async execute({ sock, jid, fullText, reply, prefix, react }) {
+      const text = fullText?.trim();
+      if (!text) {
+        return reply(`[!] Masukkan teks atau tautan yang ingin dijadikan QR Code.\nContoh: <code>${prefix}qrcode https://github.com/putrarawr/NexBot</code>`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=600x600&margin=15&data=${encodeURIComponent(text)}`;
+        const res = await fetch(qrUrl, { signal: AbortSignal.timeout(12000) });
+        if (!res.ok) throw new Error(`QR generator API status HTTP ${res.status}`);
+
+        const qrBuffer = Buffer.from(await res.arrayBuffer());
+        await sock.sendMessage(jid, {
+          image: qrBuffer,
+          caption: `<b>[ QR CODE GENERATOR ]</b>\n\nIsi: <code>${text}</code>`,
+        });
+      } catch (err) {
+        logger.error('Error saat membuat QR code:', err.message);
+        await reply(`[!] Gagal membuat QR Code: ${err.message}`);
+      }
+    },
+  });
+
+  // 9. Command: Web Screenshot (/ssweb)
+  registerCommand({
+    name: 'ssweb',
+    aliases: ['screenshot', 'webshot', 'ss'],
+    category: 'utility',
+    description: 'Mengambil tangkapan layar tampilan halaman website secara instan',
+    usage: '/ssweb <url_website>',
+    async execute({ sock, jid, fullText, reply, prefix, react }) {
+      let targetUrl = fullText?.trim();
+      if (!targetUrl) {
+        return reply(`[!] Masukkan tautan website yang ingin di-screenshot.\nContoh: <code>${prefix}ssweb https://google.com</code> atau <code>${prefix}ssweb github.com</code>`);
+      }
+
+      if (!/^https?:\/\//i.test(targetUrl)) {
+        targetUrl = `https://${targetUrl}`;
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const shotUrl = `https://image.thum.io/get/width/1280/crop/800/noanimate/${targetUrl}`;
+        const res = await fetch(shotUrl, { signal: AbortSignal.timeout(20000) });
+        if (!res.ok) throw new Error(`Screenshot API status HTTP ${res.status}`);
+
+        const imgBuffer = Buffer.from(await res.arrayBuffer());
+        if (imgBuffer.length < 500) throw new Error('Gambar screenshot tidak valid atau kosong.');
+
+        await sock.sendMessage(jid, {
+          image: imgBuffer,
+          caption: `<b>[ SCREENSHOT WEBSITE ]</b>\n\nTarget: <code>${targetUrl}</code>`,
+        });
+      } catch (err) {
+        logger.error('Error saat screenshot website:', err.message);
+        await reply(`[!] Gagal mengambil screenshot: ${err.message}`);
+      }
+    },
+  });
+
+  // 10. Command: Cari Lirik Lagu (/lirik)
+  registerCommand({
+    name: 'lirik',
+    aliases: ['lyrics', 'liriklagu'],
+    category: 'utility',
+    description: 'Mencari lirik lagu lengkap dari judul atau nama artis',
+    usage: '/lirik <judul_lagu>',
+    async execute({ fullText, reply, prefix, react }) {
+      const query = fullText?.trim();
+      if (!query) {
+        return reply(`[!] Masukkan judul lagu yang ingin dicari liriknya.\nContoh: <code>${prefix}lirik Laskar Pelangi</code> atau <code>${prefix}lirik Fix You Coldplay</code>`);
+      }
+
+      if (typeof react === 'function') await react('👍');
+
+      try {
+        const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
+        const res = await fetch(searchUrl, {
+          headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+          signal: AbortSignal.timeout(12000),
+        });
+
+        if (!res.ok) throw new Error(`Lirik API status HTTP ${res.status}`);
+
+        const items = await res.json();
+        if (!Array.isArray(items) || items.length === 0) {
+          return reply(`[!] Lirik untuk lagu "<b>${query}</b>" tidak ditemukan.`);
+        }
+
+        const match = items.find((i) => i.plainLyrics) || items[0];
+        const lyrics = match.plainLyrics || match.syncedLyrics;
+
+        if (!lyrics) {
+          return reply(`[!] Lagu ditemukan (${match.trackName} - ${match.artistName}), namun lirik teks tidak tersedia.`);
+        }
+
+        let out = `<b>[ LIRIK LAGU ]</b>\n\n`;
+        out += `🎵 <b>Judul:</b> ${match.trackName}\n`;
+        out += `🎤 <b>Artis:</b> ${match.artistName}\n`;
+        if (match.albumName) out += `💿 <b>Album:</b> ${match.albumName}\n`;
+        out += `\n─────────────────────\n\n`;
+        out += lyrics.slice(0, 3500);
+
+        await reply(out);
+      } catch (err) {
+        logger.error('Error saat mencari lirik lagu:', err.message);
+        await reply(`[!] Gagal mencari lirik lagu: ${err.message}`);
+      }
+    },
+  });
 }
