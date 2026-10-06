@@ -18,6 +18,7 @@ import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
 import { registerGroupCommands, setAfk, getAfk, removeAfk } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { execSync } from 'node:child_process';
+import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
 import { formatTelegramHtml, createTelegramSocketAdapter, handleTelegramMessage, handleTelegramCallback, buildTelegramMainMenu, getTelegramBotState } from '../src/bot/telegram.js';
 import { registerTelegramExclusiveCommands } from '../src/modules/telegram/index.js';
@@ -137,7 +138,7 @@ async function runAllTests() {
       'ip', 'whois', 'dns', 'github', 'subdomain', 'headers',
       'ai', 'explain', 'summarize', 'translate',
       'run', 'regex', 'json', 'cheat',
-      'sticker', 'toimg', 'qc', 'photolive',
+      'sticker', 'toimg', 'qc', 'photolive', 'hd', 'contrast', 'vintage', 'noir', 'story', 'hdvid', 'filter',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc',
       'hidetag', 'afk',
@@ -270,6 +271,21 @@ async function runAllTests() {
     const qcWebp = await generateQuoteSticker('Putra', 'Kata-kata mutiara hari ini', '628123456');
     assert.ok(qcWebp.length > 100);
     assert.equal(qcWebp.subarray(8, 12).toString(), 'WEBP');
+  });
+
+  await test('enhanceImageHd, contrast, vintage, and noir apply filters cleanly', async () => {
+    const dummyJpg = execSync('ffmpeg -y -f lavfi -i color=c=blue:s=120x120:d=1 -vframes 1 -f image2 -');
+    const hd = await enhanceImageHd(dummyJpg);
+    assert.ok(hd.length > 50, 'HD enhanced buffer should be valid');
+
+    const contrast = await enhanceImageContrast(dummyJpg);
+    assert.ok(contrast.length > 50);
+
+    const vintage = await enhanceImageVintage(dummyJpg);
+    assert.ok(vintage.length > 50);
+
+    const noir = await enhanceImageNoir(dummyJpg);
+    assert.ok(noir.length > 50);
   });
 
   // 4d. Group Utility & AFK Tests
@@ -418,6 +434,18 @@ async function runAllTests() {
     await handleTelegramCallback(null, mockCtx);
     assert.equal(sentTexts.length, 2);
     assert.ok(sentTexts[1].text.includes('ANGKA MAKSIMAL 6'), 'Should calculate score for dice roll 6');
+
+    // Test filter guide callback
+    mockCtx.callbackQuery.data = 'filter_info:hd';
+    await handleTelegramCallback(null, mockCtx);
+    assert.equal(sentTexts.length, 3);
+    assert.ok(sentTexts[2].text.includes('/hd'), 'Should display guide for /hd');
+
+    // Test direct tool shortcut callback
+    mockCtx.callbackQuery.data = 'menu_direct:cuaca';
+    await handleTelegramCallback(null, mockCtx);
+    assert.equal(sentTexts.length, 4);
+    assert.ok(sentTexts[3].text.includes('/cuaca'), 'Should display prompt for /cuaca');
   });
 
   await test('render8BitBar and create8BitProgressTracker format 8-bit retro bar correctly', async () => {

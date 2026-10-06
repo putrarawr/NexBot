@@ -244,11 +244,14 @@ export function buildTelegramMainMenu(pushName) {
     .text('[ GAME & KUIS ]', 'menu_cat:game')
     .text('[ AI & CHATGPT ]', 'menu_cat:ai')
     .row()
-    .text('[ OSINT & NET ]', 'menu_cat:osint')
-    .text('[ PEMROGRAMAN ]', 'menu_cat:programming')
+    .text('[ CUACA & GEMPA ]', 'menu_cat:info')
+    .text('[ ISLAMI & SHOLAT ]', 'menu_cat:islami')
     .row()
     .text('[ DOWNLOADER ]', 'menu_cat:downloader')
-    .text('[ EKSKLUSIF TELE ]', 'menu_cat:telegram')
+    .text('[ FOTO & VIDEO HD ]', 'menu_cat:media')
+    .row()
+    .text('[ TOOLS & UTILITAS ]', 'menu_cat:utility')
+    .text('[ OSINT & NET ]', 'menu_cat:osint')
     .row()
     .text('[ DADU & CASINO ]', 'menu_cat:dice_picker')
     .text('[ SEMUA PERINTAH ]', 'menu_all')
@@ -273,10 +276,14 @@ export function buildCategoryMenu(catName) {
   const catHeaders = {
     game: 'GAME & KUIS INTERAKTIF',
     ai: 'ARTIFICIAL INTELLIGENCE (AI)',
+    info: 'INFORMASI CUACA, GEMPA & WIKIPEDIA',
+    islami: 'ISLAMI & JADWAL SHOLAT',
+    media: 'FOTO, VIDEO HD & AESTHETIC STORY',
+    downloader: 'MEDIA & SOSMED DOWNLOADER',
+    utility: 'UTILITY & TOOLS',
+    telegram: 'FITUR EKSKLUSIF TELEGRAM',
     osint: 'OSINT & NETWORK TOOLS',
     programming: 'PEMROGRAMAN & DEV TOOLS',
-    downloader: 'MEDIA & SOSMED DOWNLOADER',
-    telegram: 'FITUR EKSKLUSIF TELEGRAM',
     group: 'MANAJEMEN GRUP',
     general: 'UTILITY & UMUM',
   };
@@ -316,6 +323,26 @@ export function buildCategoryMenu(catName) {
   } else if (catName === 'ai') {
     keyboard
       .text('[ CARA PAKAI AI ]', 'quick_ai')
+      .row();
+  } else if (catName === 'media') {
+    keyboard
+      .text('[ 💎 HD ENHANCE ]', 'filter_info:hd')
+      .text('[ 🎬 STORY 9:16 ]', 'filter_info:story')
+      .row()
+      .text('[ 🌗 KONTRAS ]', 'filter_info:contrast')
+      .text('[ 🎞️ VINTAGE ]', 'filter_info:vintage')
+      .row()
+      .text('[ 🖤 NOIR B&W ]', 'filter_info:noir')
+      .text('[ 📹 HD VIDEO ]', 'filter_info:hdvid')
+      .row();
+  } else if (catName === 'info') {
+    keyboard
+      .text('[ 🌍 GEMPA BMKG ]', 'menu_direct:gempa')
+      .text('[ ⛅ CEK CUACA ]', 'menu_direct:cuaca')
+      .row();
+  } else if (catName === 'islami') {
+    keyboard
+      .text('[ 🕌 JADWAL SHOLAT ]', 'menu_direct:sholat')
       .row();
   }
 
@@ -964,6 +991,46 @@ export async function handleTelegramCallback(_bot, ctx) {
       const round = playRpsRound(choice, pushName, userId);
       await safeEditOrReply(ctx, round.text, round.keyboard);
       return;
+    }
+
+    // 13. Filter Info Guide
+    if (data.startsWith('filter_info:')) {
+      const type = data.replace('filter_info:', '');
+      const guides = {
+        hd: '<b>[ CARA PAKAI: /hd ]</b>\n\nKirim foto dengan caption <code>/hd</code> atau balas foto yang sudah ada dengan <code>/hd</code> untuk meningkatkan resolusi & ketajaman foto.',
+        story: '<b>[ CARA PAKAI: /story ]</b>\n\nKirim foto dengan caption <code>/story</code> untuk mengubah foto menjadi video story vertikal 9:16 aesthetic dengan gerakan zoom & vignette.',
+        contrast: '<b>[ CARA PAKAI: /contrast ]</b>\n\nBalas foto dengan <code>/contrast</code> untuk meningkatkan dynamic range dan ketajaman kontras warna.',
+        vintage: '<b>[ CARA PAKAI: /vintage ]</b>\n\nBalas foto dengan <code>/vintage</code> untuk menerapkan filter warna film analog 90s.',
+        noir: '<b>[ CARA PAKAI: /noir ]</b>\n\nBalas foto dengan <code>/noir</code> untuk mengubah foto menjadi hitam-putih monokrom kontras tinggi.',
+        hdvid: '<b>[ CARA PAKAI: /hdvid ]</b>\n\nKirim video dengan caption <code>/hdvid</code> atau balas video untuk meningkatkan kejernihan dan ketajaman video.',
+      };
+      const text = guides[type] || 'Kirim atau balas foto/video dengan perintah filter.';
+      const keyboard = new InlineKeyboard().text('[ « KEMBALI ]', 'menu_cat:media');
+      await safeEditOrReply(ctx, text, keyboard);
+      return;
+    }
+
+    // 14. Direct Tool Execution from Menu
+    if (data.startsWith('menu_direct:')) {
+      const cmd = data.replace('menu_direct:', '');
+      if (cmd === 'gempa') {
+        const gempaCmd = commands.get('gempa');
+        if (gempaCmd) {
+          const telegramSock = createTelegramSocketAdapter(_bot, ctx, chatId);
+          await gempaCmd.execute({ sock: telegramSock, jid: chatId, reply: (t) => ctx.reply(t, { parse_mode: 'HTML' }), react: (e) => ctx.react?.(e) });
+        }
+        return;
+      }
+      if (cmd === 'cuaca') {
+        const text = '<b>[ CEK CUACA ]</b>\n\nKetik langsung di chat:\n<code>/cuaca Jakarta</code> atau <code>/cuaca Surabaya</code>';
+        await safeEditOrReply(ctx, text, new InlineKeyboard().text('[ « KEMBALI ]', 'menu_cat:info'));
+        return;
+      }
+      if (cmd === 'sholat') {
+        const text = '<b>[ JADWAL SHOLAT ]</b>\n\nKetik langsung di chat:\n<code>/sholat Jakarta</code> atau <code>/sholat Bandung</code>';
+        await safeEditOrReply(ctx, text, new InlineKeyboard().text('[ « KEMBALI ]', 'menu_cat:islami'));
+        return;
+      }
     }
   } catch (err) {
     logger.error('[Telegram] Error saat menangani callback query:', err);

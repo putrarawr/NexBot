@@ -346,8 +346,11 @@ registerCommand({
   async execute({ reply, config, prefix, pushName }) {
     const categories = getCommandsByCategory('whatsapp');
     const categoryHeaders = {
-      media: 'MEDIA, STIKER & PHOTOLIVE',
+      media: 'MEDIA, STIKER & FOTO HD',
       downloader: 'SOCIAL MEDIA DOWNLOADER',
+      info: 'INFORMASI CUACA, GEMPA & WIKIPEDIA',
+      islami: 'ISLAMI & JADWAL SHOLAT',
+      utility: 'TOOLS & UTILITY',
       group: 'GRUP & MANAJEMEN',
       game: 'GAME & KUIS',
       osint: 'OSINT & NETWORK',

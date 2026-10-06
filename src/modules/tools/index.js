@@ -6,7 +6,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'gempa',
     aliases: ['infogempa', 'bmkg', 'earthquake'],
-    category: 'general',
+    category: 'info',
     description: 'Informasi gempa bumi terkini dari BMKG Indonesia lengkap dengan peta',
     usage: '/gempa',
     async execute({ sock, jid, reply, react }) {
@@ -63,7 +63,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'cuaca',
     aliases: ['weather', 'suhu', 'forecast'],
-    category: 'general',
+    category: 'info',
     description: 'Cek prakiraan cuaca, suhu, dan kelembapan kota terkini',
     usage: '/cuaca <nama_kota>',
     async execute({ args, reply, prefix, react }) {
@@ -114,7 +114,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'sholat',
     aliases: ['jadwalsholat', 'adzan', 'prayer'],
-    category: 'general',
+    category: 'islami',
     description: 'Jadwal waktu sholat harian untuk kota di Indonesia',
     usage: '/sholat <nama_kota>',
     async execute({ args, reply, prefix, react }) {
@@ -166,7 +166,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'wiki',
     aliases: ['wikipedia', 'artikil'],
-    category: 'general',
+    category: 'info',
     description: 'Cari ringkasan ensiklopedia Wikipedia bahasa Indonesia',
     usage: '/wiki <topik>',
     async execute({ sock, jid, fullText, reply, prefix, react }) {
@@ -222,7 +222,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'short',
     aliases: ['shortlink', 'shorten', 'tinyurl'],
-    category: 'general',
+    category: 'utility',
     description: 'Memperpendek tautan URL panjang secara instan',
     usage: '/short <url_panjang>',
     async execute({ args, reply, prefix, react }) {
@@ -258,7 +258,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'unshort',
     aliases: ['expandurl', 'ceklink', 'unshorten'],
-    category: 'general',
+    category: 'utility',
     description: 'Mengecek link asli di balik URL pendek untuk keamanan',
     usage: '/unshort <url_pendek>',
     async execute({ args, reply, prefix, react }) {
@@ -293,7 +293,7 @@ export function registerUtilityTools() {
   registerCommand({
     name: 'calc',
     aliases: ['hitung', 'kalkulator', 'mathcalc'],
-    category: 'general',
+    category: 'utility',
     description: 'Menghitung ekspresi matematika dasar secara instan',
     usage: '/calc <ekspresi_matematika>',
     async execute({ fullText, reply, prefix }) {
