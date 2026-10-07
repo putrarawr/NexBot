@@ -20,10 +20,10 @@
   "aiProvider": "hybrid",
   "groqApiKey": "",
   "geminiApiKey": "",
-  "telegramBotToken": "8849511108:AAEh7VkWlCxGHmrPf9YanYYqooSaL8oNS_0",
-  "telegramOwnerId": "8244607780",
+  "telegramBotToken": "",
+  "telegramOwnerId": "",
   "enableWhatsApp": true,
   "enableTelegram": true,
-  "simpklUsername": "0081361735",
-  "simpklPassword": "rexx12345rawr"
+  "simpklUsername": "",
+  "simpklPassword": ""
 }
