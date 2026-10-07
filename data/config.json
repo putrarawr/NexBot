@@ -3,6 +3,7 @@
   "prefix": ".",
   "adminPassword": "admin123",
   "ownerNumber": "",
+  "groupOwnerOnly": true,
   "selfMode": true,
   "autocomplete": true,
   "antiSpamKick": true,

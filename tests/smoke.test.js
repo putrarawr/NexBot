@@ -26,6 +26,9 @@ import {
   matchesParticipant,
   checkGroupAdminPerms,
   resolveTargetJid,
+  isUserOwner,
+  cleanJidNumber,
+  MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { generateMemeSticker, generateBratSticker } from '../src/modules/media/index.js';
@@ -157,6 +160,7 @@ async function runAllTests() {
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc', 'qrcode', 'ssweb', 'lirik',
       'hidetag', 'tagall', 'kick', 'add', 'promote', 'demote', 'group', 'linkgc', 'revoke', 'antilink', 'afk',
+      'groupmode', 'setowner', 'owner',
       'veriftok',
     ];
 
@@ -406,6 +410,71 @@ async function runAllTests() {
 
     const rawNum = resolveTargetJid(null, ['081234567890']);
     assert.equal(rawNum, '081234567890@s.whatsapp.net');
+  });
+
+  await test('isUserOwner and groupOwnerOnly lock enforce owner-exclusive group security', async () => {
+    const mockSock = {
+      user: {
+        id: '628123456789:0@s.whatsapp.net',
+        lid: '123456789@lid',
+      },
+      groupMetadata: async () => ({
+        id: '99999@g.us',
+        participants: [
+          { id: '123456789@lid', admin: 'admin' }, // Bot as admin
+          { id: '628888888888@s.whatsapp.net', admin: 'admin' }, // Regular admin user (not owner)
+          { id: '628777777777@s.whatsapp.net', admin: null }, // Regular member
+          { id: '628123456789@s.whatsapp.net', admin: 'admin' }, // Owner user
+        ],
+      }),
+    };
+
+    // 1. isUserOwner detection
+    assert.equal(isUserOwner({ msg: { key: { fromMe: true } } }), true, 'fromMe should always be owner');
+    assert.equal(isUserOwner({ sender: '628123456789:2@s.whatsapp.net', sock: mockSock }), true, 'Bot sock user is owner');
+    assert.equal(
+      isUserOwner({ sender: '08555666777', config: { ownerNumber: '628555666777' } }),
+      true,
+      '08xx should match 62xx ownerNumber'
+    );
+    assert.equal(
+      isUserOwner({ sender: '628999999999@s.whatsapp.net', config: { ownerNumber: '628555666777' } }),
+      false,
+      'Random user should NOT be owner'
+    );
+
+    // 2. Default owner-only mode: Non-owner admin should be REJECTED with MSG_OWNER_ONLY
+    const permsAdminLocked = await checkGroupAdminPerms(
+      mockSock,
+      '99999@g.us',
+      '628888888888@s.whatsapp.net',
+      { ownerNumber: '628123456789', groupOwnerOnly: true }
+    );
+    assert.equal(permsAdminLocked.isSenderAdmin, true, 'User is admin in group');
+    assert.equal(permsAdminLocked.isSenderOwner, false, 'User is not bot owner');
+    assert.equal(permsAdminLocked.isAllowed, false, 'Should NOT be allowed in owner-only mode');
+    assert.equal(permsAdminLocked.rejectReason, MSG_OWNER_ONLY, 'Reject reason must be MSG_OWNER_ONLY');
+
+    // 3. Default owner-only mode: Owner Bot should be ALLOWED
+    const permsOwner = await checkGroupAdminPerms(
+      mockSock,
+      '99999@g.us',
+      '628123456789@s.whatsapp.net',
+      { ownerNumber: '628123456789', groupOwnerOnly: true }
+    );
+    assert.equal(permsOwner.isSenderOwner, true, 'User is bot owner');
+    assert.equal(permsOwner.isAllowed, true, 'Owner should be allowed');
+    assert.equal(permsOwner.rejectReason, null, 'Reject reason must be null for owner');
+
+    // 4. Admin-allowed mode (groupOwnerOnly: false): Any admin is ALLOWED
+    const permsAdminUnlocked = await checkGroupAdminPerms(
+      mockSock,
+      '99999@g.us',
+      '628888888888@s.whatsapp.net',
+      { ownerNumber: '628123456789', groupOwnerOnly: false }
+    );
+    assert.equal(permsAdminUnlocked.isAllowed, true, 'Admin should be allowed when groupOwnerOnly is false');
+    assert.equal(permsAdminUnlocked.rejectReason, null);
   });
 
   // 4e. Telegram Bot Engine & Adapter

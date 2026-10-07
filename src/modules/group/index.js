@@ -1,5 +1,6 @@
 import { registerCommand } from '../../bot/handler.js';
 import { logger } from '../../utils/logger.js';
+import { updateConfig, getConfig } from '../../config.js';
 import { areJidsSameUser, jidNormalizedUser } from '@whiskeysockets/baileys';
 
 // In-memory AFK store: Key = senderJid -> { reason, time, name }
@@ -84,6 +85,55 @@ Akun WhatsApp Bot belum berstatus *Admin* di grup ini.
 
 WhatsApp mewajibkan Bot menjadi Admin untuk mengelola anggota, perizinan grup, dan link undangan.`;
 
+export const MSG_OWNER_ONLY = `[ ⛔ KHUSUS OWNER BOT ]
+
+Perintah manajemen grup ini dibatasi hanya untuk *Owner Bot* demi keamanan & privasi grup.
+
+💡 _Jika ingin membuka akses untuk semua admin grup, Owner dapat mengetik:_
+*.groupmode admin*`;
+
+export function cleanJidNumber(jid) {
+  if (!jid) return '';
+  const userPart = String(jid).split('@')[0].split(':')[0];
+  let digits = userPart.replace(/[^0-9]/g, '');
+  if (digits.startsWith('0')) {
+    digits = '62' + digits.slice(1);
+  }
+  return digits;
+}
+
+export function isUserOwner({ sender, msg, sock, config, senderMember } = {}) {
+  // 1. WhatsApp native session check (pesan dikirim dari akun bot itu sendiri)
+  if (msg?.key?.fromMe) return true;
+
+  // 2. Sock user matching (id / lid bot)
+  const botJid = sock?.user?.id || sock?.authState?.creds?.me?.id || null;
+  const botLid = sock?.user?.lid || sock?.authState?.creds?.me?.lid || null;
+  if (botJid || botLid) {
+    if (sender && matchesParticipant({ id: sender }, botJid, botLid)) return true;
+    if (senderMember && matchesParticipant(senderMember, botJid, botLid)) return true;
+  }
+
+  // 3. Config & Environment ownerNumber check
+  const configuredOwner = config?.ownerNumber || process.env.OWNER_NUMBER || '';
+  const ownerNum = cleanJidNumber(configuredOwner);
+
+  if (ownerNum.length >= 7) {
+    const senderNum = cleanJidNumber(sender);
+    if (senderNum && (senderNum === ownerNum || senderNum.endsWith(ownerNum) || ownerNum.endsWith(senderNum))) {
+      return true;
+    }
+    if (senderMember) {
+      const idNum = cleanJidNumber(senderMember.id);
+      const jidNum = cleanJidNumber(senderMember.jid);
+      if (idNum && (idNum === ownerNum || idNum.endsWith(ownerNum) || ownerNum.endsWith(idNum))) return true;
+      if (jidNum && (jidNum === ownerNum || jidNum.endsWith(ownerNum) || ownerNum.endsWith(jidNum))) return true;
+    }
+  }
+
+  return false;
+}
+
 export function matchesParticipant(p, targetJid, targetLid = null) {
   if (!p) return false;
 
@@ -155,9 +205,10 @@ export async function checkAntilinkMessage({ sock, jid, sender, text, msg, reply
   const linkRegex = /(chat\.whatsapp\.com\/[0-9A-Za-z]{20,24}|wa\.me\/settings)/i;
   if (!linkRegex.test(text)) return false;
 
-  const senderClean = sender.replace(/[^0-9]/g, '');
-  const isOwner = config?.ownerNumber && senderClean.includes(config.ownerNumber.replace(/[^0-9]/g, ''));
+  const isOwner = isUserOwner({ sender, msg, sock, config });
   if (isOwner) return false;
+
+  const senderClean = cleanJidNumber(sender);
 
   try {
     const meta = await sock.groupMetadata(jid);
@@ -184,7 +235,7 @@ export async function checkAntilinkMessage({ sock, jid, sender, text, msg, reply
   }
 }
 
-export async function checkGroupAdminPerms(sock, jid, sender, config) {
+export async function checkGroupAdminPerms(sock, jid, sender, config, msg = null) {
   const meta = await sock.groupMetadata(jid);
   const participants = meta.participants || [];
 
@@ -197,25 +248,37 @@ export async function checkGroupAdminPerms(sock, jid, sender, config) {
   // Sender resolution
   const senderMember = participants.find((p) => matchesParticipant(p, sender));
 
-  // Check if sender is owner (by config.ownerNumber)
-  const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
-  let isSenderOwner = false;
-  if (ownerNum.length >= 7) {
-    if (sender && sender.replace(/[^0-9]/g, '').includes(ownerNum)) {
-      isSenderOwner = true;
-    }
-    if (senderMember) {
-      const idNum = (senderMember.id || '').replace(/[^0-9]/g, '');
-      const jidNum = (senderMember.jid || '').replace(/[^0-9]/g, '');
-      if (idNum.includes(ownerNum) || jidNum.includes(ownerNum)) {
-        isSenderOwner = true;
-      }
+  // Determine Owner Status
+  const isSenderOwner = isUserOwner({ sender, msg, sock, config, senderMember });
+
+  // Admin status in WhatsApp group
+  const isParticipantAdmin = isParticipantAdminRole(senderMember);
+  const isSenderAdmin = Boolean(isSenderOwner || isParticipantAdmin);
+
+  // Mode perizinan: khusus owner (default: true) vs semua admin grup (false)
+  const isOwnerOnly = config?.groupOwnerOnly !== false;
+  const isAllowed = isOwnerOnly ? isSenderOwner : isSenderAdmin;
+
+  let rejectReason = null;
+  if (!isAllowed) {
+    if (isOwnerOnly && !isSenderOwner) {
+      rejectReason = MSG_OWNER_ONLY;
+    } else {
+      rejectReason = MSG_SENDER_NOT_ADMIN;
     }
   }
 
-  const isSenderAdmin = Boolean(isSenderOwner || isParticipantAdminRole(senderMember));
-
-  return { isSenderAdmin, isBotAdmin, meta, senderMember, botMember };
+  return {
+    isSenderAdmin,
+    isBotAdmin,
+    isSenderOwner,
+    isOwnerOnly,
+    isAllowed,
+    rejectReason,
+    meta,
+    senderMember,
+    botMember,
+  };
 }
 
 export function getContextInfo(msg) {
@@ -264,9 +327,9 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin, meta } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) {
-          return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason, meta } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) {
+          return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         }
 
         const keepMessage = /--keep|-k\b/i.test(fullText || '');
@@ -315,15 +378,15 @@ export function registerGroupCommands() {
     description: 'Mention seluruh anggota grup dengan daftar nomor terbuka',
     usage: '.tagall [pesan]',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, fullText, reply, config }) {
+    async execute({ sock, msg, jid, sender, fullText, reply, config }) {
       if (!jid.endsWith('@g.us')) {
         return reply('[!] Perintah ini hanya dapat digunakan di dalam Grup WhatsApp.');
       }
 
       try {
-        const { isSenderAdmin, meta } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) {
-          return reply('[!] Perintah .tagall hanya boleh digunakan oleh Admin Grup.');
+        const { isAllowed, rejectReason, meta } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) {
+          return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         }
 
         const participants = meta.participants.map((p) => p.id);
@@ -365,8 +428,8 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
@@ -375,12 +438,11 @@ export function registerGroupCommands() {
           return reply('[!] Bot tidak dapat mengeluarkan dirinya sendiri.');
         }
 
-        const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
-        if (ownerNum && target.replace(/[^0-9]/g, '').includes(ownerNum)) {
+        if (isUserOwner({ sender: target, sock, config })) {
           return reply('[!] Tidak dapat mengeluarkan Owner Bot dari grup.');
         }
 
-        const targetClean = target.replace(/[^0-9]/g, '');
+        const targetClean = cleanJidNumber(target);
         await sock.groupParticipantsUpdate(jid, [target], 'remove');
         await reply(`[+] Berhasil mengeluarkan @${targetClean} dari grup.`, { mentions: [target] });
       } catch (err) {
@@ -397,7 +459,7 @@ export function registerGroupCommands() {
     description: 'Menambahkan anggota baru ke grup',
     usage: '.add 628xxxxxxxx',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, args, reply, config }) {
+    async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
       const num = (args[0] || '').replace(/[^0-9]/g, '');
@@ -406,8 +468,8 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const targetJid = `${num}@s.whatsapp.net`;
@@ -436,12 +498,12 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         await sock.groupParticipantsUpdate(jid, [target], 'promote');
-        await reply(`[+] Selamat! @${target.replace(/[^0-9]/g, '')} sekarang adalah Admin Grup.`, { mentions: [target] });
+        await reply(`[+] Selamat! @${cleanJidNumber(target)} sekarang adalah Admin Grup.`, { mentions: [target] });
       } catch (err) {
         await reply(`[!] Gagal promote: ${err.message}`);
       }
@@ -465,8 +527,8 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const botJid = sock.user?.id || sock.authState?.creds?.me?.id || null;
@@ -475,13 +537,12 @@ export function registerGroupCommands() {
           return reply('[!] Bot tidak dapat menurunkan jabatan dirinya sendiri.');
         }
 
-        const ownerNum = (config?.ownerNumber || '').replace(/[^0-9]/g, '');
-        if (ownerNum && target.replace(/[^0-9]/g, '').includes(ownerNum)) {
+        if (isUserOwner({ sender: target, sock, config })) {
           return reply('[!] Tidak dapat menurunkan jabatan Owner Bot.');
         }
 
         await sock.groupParticipantsUpdate(jid, [target], 'demote');
-        await reply(`[+] @${target.replace(/[^0-9]/g, '')} telah diturunkan menjadi anggota biasa.`, { mentions: [target] });
+        await reply(`[+] @${cleanJidNumber(target)} telah diturunkan menjadi anggota biasa.`, { mentions: [target] });
       } catch (err) {
         await reply(`[!] Gagal demote: ${err.message}`);
       }
@@ -496,7 +557,7 @@ export function registerGroupCommands() {
     description: 'Membuka atau menutup izin kirim pesan grup',
     usage: '.group open / .group close',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, args, reply, config }) {
+    async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
       const action = (args[0] || '').toLowerCase();
@@ -505,8 +566,8 @@ export function registerGroupCommands() {
       }
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         if (action === 'open' || action === 'buka') {
@@ -530,12 +591,12 @@ export function registerGroupCommands() {
     description: 'Mengambil link undangan grup WhatsApp',
     usage: '.linkgc',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, reply, config }) {
+    async execute({ sock, msg, jid, sender, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const code = await sock.groupInviteCode(jid);
@@ -553,12 +614,12 @@ export function registerGroupCommands() {
     description: 'Mereset link undangan grup WhatsApp',
     usage: '.revoke',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, reply, config }) {
+    async execute({ sock, msg, jid, sender, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
       try {
-        const { isSenderAdmin, isBotAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, isBotAdmin, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
         if (!isBotAdmin) return reply(MSG_BOT_NOT_ADMIN);
 
         const newCode = await sock.groupRevokeInvite(jid);
@@ -577,12 +638,12 @@ export function registerGroupCommands() {
     description: 'Mengaktifkan / menonaktifkan proteksi anti-link grup WhatsApp',
     usage: '.antilink on / .antilink off',
     platforms: ['whatsapp'],
-    async execute({ sock, jid, sender, args, reply, config }) {
+    async execute({ sock, msg, jid, sender, args, reply, config }) {
       if (!jid.endsWith('@g.us')) return reply('[!] Khusus grup WhatsApp.');
 
       try {
-        const { isSenderAdmin } = await checkGroupAdminPerms(sock, jid, sender, config);
-        if (!isSenderAdmin) return reply(MSG_SENDER_NOT_ADMIN);
+        const { isAllowed, rejectReason } = await checkGroupAdminPerms(sock, jid, sender, config, msg);
+        if (!isAllowed) return reply(rejectReason || MSG_SENDER_NOT_ADMIN);
 
         const mode = (args[0] || '').toLowerCase();
         if (mode === 'on' || mode === 'aktif' || mode === '1') {
@@ -611,7 +672,7 @@ export function registerGroupCommands() {
     async execute({ sender, pushName, fullText, reply }) {
       const reason = fullText?.trim() || 'Tanpa alasan';
       setAfk(sender, reason, pushName);
-      const senderNum = sender.replace(/[^0-9]/g, '');
+      const senderNum = cleanJidNumber(sender);
 
       let msg = `[STATUS AFK AKTIF]\n\n`;
       msg += `Pengguna: @${senderNum}\n`;
@@ -619,6 +680,108 @@ export function registerGroupCommands() {
       msg += `Bot otomatis memberitahu member lain jika kamu di-tag di grup. Ketik pesan apa saja untuk kembali aktif.`;
 
       await reply(msg, { mentions: [sender] });
+    },
+  });
+
+  // 11. Command: Group Mode (.groupmode)
+  registerCommand({
+    name: 'groupmode',
+    aliases: ['grupakomodir', 'groupperms'],
+    category: 'group',
+    description: 'Mengatur mode izin perintah grup (khusus Owner vs seluruh Admin)',
+    usage: '.groupmode [owner | admin | status]',
+    platforms: ['whatsapp'],
+    async execute({ sock, msg, sender, args, reply, config }) {
+      const isOwner = isUserOwner({ sender, msg, sock, config });
+      if (!isOwner) {
+        return reply('[ ⛔ KHUSUS OWNER BOT ]\n\nHanya Owner Bot yang memiliki hak untuk mengubah mode izin grup.');
+      }
+
+      const mode = (args[0] || '').toLowerCase();
+      if (mode === 'owner' || mode === 'khususowner' || mode === 'private') {
+        updateConfig({ groupOwnerOnly: true });
+        return reply(`[ 🔒 MODE GRUP DIPERBARUI ]\n\nStatus: *KHUSUS OWNER BOT*\nPerintah manajemen grup (.hidetag, .kick, .tagall, .group, dll) sekarang HANYA bisa digunakan oleh Owner Bot demi keamanan grup.`);
+      } else if (mode === 'admin' || mode === 'semuaadmin' || mode === 'public') {
+        updateConfig({ groupOwnerOnly: false });
+        return reply(`[ 🔓 MODE GRUP DIPERBARUI ]\n\nStatus: *SELURUH ADMIN GRUP*\nPerintah manajemen grup sekarang dapat digunakan oleh semua Admin Grup WhatsApp.`);
+      } else {
+        const current = (config?.groupOwnerOnly !== false) ? '🔒 KHUSUS OWNER BOT' : '🔓 SELURUH ADMIN GRUP';
+        return reply(`[ ⚙️ MODE PERIZINAN GRUP ]\n\nStatus Saat Ini: *${current}*\n\nUbah mode dengan:\n• \`.groupmode owner\` (Hanya kamu/Owner Bot yang bisa)\n• \`.groupmode admin\` (Semua admin grup bisa memakai)`);
+      }
+    },
+  });
+
+  // 12. Command: Set Owner (.setowner)
+  registerCommand({
+    name: 'setowner',
+    aliases: ['owneradd', 'claimowner'],
+    category: 'group',
+    description: 'Menetapkan nomor Owner Bot untuk mengamankan hak akses grup',
+    usage: '.setowner [nomor / me] [password_jika_belum_ada_owner]',
+    platforms: ['whatsapp'],
+    async execute({ sock, msg, jid, sender, args, reply, config }) {
+      const isCurrentOwner = isUserOwner({ sender, msg, sock, config });
+      const currentOwnerNum = cleanJidNumber(config?.ownerNumber || process.env.OWNER_NUMBER || '');
+      const isGroup = jid.endsWith('@g.us');
+
+      // Proteksi jika owner sudah terdaftar dan pengirim bukan owner
+      if (currentOwnerNum && !isCurrentOwner) {
+        return reply(`[ ⛔ AKSES DITOLAK ]\n\nOwner Bot saat ini telah terdaftar: @${currentOwnerNum}.\nHanya Owner yang terdaftar yang dapat mengubah nomor owner.`, {
+          mentions: [`${currentOwnerNum}@s.whatsapp.net`],
+        });
+      }
+
+      // Jika belum ada owner terdaftar dan dijalankan di grup oleh non-bot account
+      if (!currentOwnerNum && !isCurrentOwner && isGroup) {
+        const providedPass = args[1] || '';
+        const adminPass = config?.adminPassword || 'admin123';
+        if (providedPass !== adminPass) {
+          return reply(`[ 🔒 KLAIM OWNER BUTUH AUTENTIKASI ]\n\nUntuk mengklaim bot pertama kali di dalam grup, sertakan password admin:\n• \`.setowner me <password>\`\natau kirim perintah ini lewat Chat Pribadi (DM) bot.`);
+        }
+      }
+
+      let targetNum = '';
+      const firstArg = args[0]?.toLowerCase();
+      if (firstArg === 'me' || !firstArg) {
+        targetNum = cleanJidNumber(sender);
+      } else {
+        const target = resolveTargetJid(msg, args);
+        targetNum = target ? cleanJidNumber(target) : cleanJidNumber(args[0]);
+      }
+
+      if (!targetNum || targetNum.length < 8) {
+        return reply('[!] Format nomor tidak valid. Contoh:\n• `.setowner me` (Klaim nomormu sebagai owner)\n• `.setowner 628123456789`');
+      }
+
+      updateConfig({ ownerNumber: targetNum });
+      return reply(`[ 👑 OWNER BOT BERHASIL DITETAPKAN ]\n\nNomor Owner: @${targetNum}\nStatus Mode Grup: *${config?.groupOwnerOnly !== false ? '🔒 Khusus Owner' : '🔓 Semua Admin'}*\n\nSeluruh perintah manajemen grup diproteksi penuh untuk nomormu!`, {
+        mentions: [`${targetNum}@s.whatsapp.net`],
+      });
+    },
+  });
+
+  // 13. Command: Owner (.owner)
+  registerCommand({
+    name: 'owner',
+    aliases: ['creator', 'pemilik'],
+    category: 'general',
+    description: 'Menampilkan kontak & informasi Owner Bot',
+    usage: '.owner',
+    platforms: ['whatsapp'],
+    async execute({ sock, reply, config }) {
+      const ownerNum = config?.ownerNumber || process.env.OWNER_NUMBER || '';
+      const botNum = cleanJidNumber(sock?.user?.id);
+      const displayNum = ownerNum || botNum || 'Belum diatur';
+
+      let text = `╔══════════════════════════════════╗\n`;
+      text += `       👑 *OWNER / CREATOR BOT*     \n`;
+      text += `╚══════════════════════════════════╝\n\n`;
+      text += `• Kontak WhatsApp: wa.me/${cleanJidNumber(displayNum)}\n`;
+      text += `• Nomor: @${cleanJidNumber(displayNum)}\n`;
+      text += `• Group Lock: *${config?.groupOwnerOnly !== false ? '🔒 Khusus Owner' : '🔓 Admin Grup'}*\n\n`;
+      text += `_Hubungi owner jika ada kendala atau ingin mengundang bot ke grup._`;
+
+      return reply(text, { mentions: displayNum !== 'Belum diatur' ? [`${cleanJidNumber(displayNum)}@s.whatsapp.net`] : [] });
     },
   });
 }

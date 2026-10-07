@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = {
   prefix: process.env.PREFIX || '.',
   adminPassword: process.env.ADMIN_PASSWORD || 'admin123',
   ownerNumber: process.env.OWNER_NUMBER || '',
+  groupOwnerOnly: true, // Default: Perintah grup dibatasi khusus Owner Bot
   selfMode: true,
   autocomplete: true,
   antiSpamKick: true,
@@ -48,6 +49,8 @@ export function initConfig() {
       activeConfig = {
         ...DEFAULT_CONFIG,
         ...parsed,
+        ownerNumber: parsed.ownerNumber || process.env.OWNER_NUMBER || '',
+        groupOwnerOnly: parsed.groupOwnerOnly != null ? parsed.groupOwnerOnly : true,
         geminiApiKey: process.env.GEMINI_API_KEY || parsed.geminiApiKey || '',
         groqApiKey: process.env.GROQ_API_KEY || parsed.groqApiKey || '',
         telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || parsed.telegramBotToken || '',
