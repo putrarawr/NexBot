@@ -10,7 +10,7 @@ import { handleGameInput } from '../modules/game/index.js';
 import { tebakGambarList } from '../modules/game/questions.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, visualSessions, buildRpsKeyboard, playRpsRound } from '../modules/game/visual-games.js';
 import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, cancelMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
-import { handleSimpklCallback } from '../modules/simpkl/index.js';
+import { handleSimpklCallback, handleSimpklMessageInterceptor } from '../modules/simpkl/index.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -461,6 +461,16 @@ export async function handleTelegramMessage(bot, ctx) {
       reply,
     });
     if (gameIntercepted) return;
+
+    // 1b. Interceptor Percakapan SIMPKL (Balasan 1 kalimat untuk 4 hari kerja sisa)
+    const simpklHandled = await handleSimpklMessageInterceptor({
+      ctx,
+      userId,
+      chatId,
+      text: rawText,
+      reply,
+    });
+    if (simpklHandled) return;
 
     // 2. Cek Music Selection (1 - 5)
     const pendingMusic = getMusicSelection({ platform: 'telegram', chatId, userId });

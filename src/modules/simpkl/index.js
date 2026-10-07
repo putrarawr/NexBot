@@ -371,6 +371,314 @@ export function getSubmittedDatesSet() {
 }
 
 /**
+ * Tracking riwayat jurnal SIMPKL:
+ * Menghitung tanggal terakhir submit dan daftar minggu kerja yang belum disubmit secara urut
+ */
+export function getSimpklWorkweekTracking() {
+  const submittedDates = getSubmittedDatesSet();
+  const sortedDates = Array.from(submittedDates).sort();
+  const lastSubmittedDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : null;
+
+  let searchStart;
+  if (lastSubmittedDate) {
+    const lastDateObj = new Date(lastSubmittedDate);
+    const nextDay = new Date(lastDateObj);
+    nextDay.setDate(nextDay.getDate() + 1);
+    while (nextDay.getDay() === 0 || nextDay.getDay() === 6) {
+      nextDay.setDate(nextDay.getDate() + 1);
+    }
+    searchStart = nextDay;
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() - 28);
+    searchStart = d;
+  }
+
+  const startMonday = new Date(getMondayOfDate(searchStart));
+  const now = new Date();
+  const currentMonday = new Date(getMondayOfDate(now));
+
+  const unsubmittedWeeks = [];
+  let curr = new Date(startMonday);
+
+  while (curr <= currentMonday) {
+    const monStr = curr.toISOString().split('T')[0];
+    const friObj = new Date(curr);
+    friObj.setDate(friObj.getDate() + 4);
+    const friStr = friObj.toISOString().split('T')[0];
+
+    let missingDays = 0;
+    for (let i = 0; i < 5; i++) {
+      const checkD = new Date(curr);
+      checkD.setDate(checkD.getDate() + i);
+      const dStr = checkD.toISOString().split('T')[0];
+      if (!submittedDates.has(dStr)) {
+        missingDays++;
+      }
+    }
+
+    const isCurrent = monStr === getMondayOfDate(now);
+    const prevMonObj = new Date(currentMonday);
+    prevMonObj.setDate(prevMonObj.getDate() - 7);
+    const isPrevious = monStr === prevMonObj.toISOString().split('T')[0];
+
+    let label = `${monStr} s.d. ${friStr}`;
+    if (isCurrent) label += ' (Minggu Ini)';
+    else if (isPrevious) label += ' (Minggu Lalu)';
+
+    if (missingDays > 0) {
+      unsubmittedWeeks.push({
+        monday: monStr,
+        friday: friStr,
+        missingDays,
+        isCurrent,
+        isPrevious,
+        label,
+      });
+    }
+
+    curr.setDate(curr.getDate() + 7);
+  }
+
+  const targetWeek = unsubmittedWeeks.length > 0 ? unsubmittedWeeks[0] : null;
+
+  return {
+    lastSubmittedDate,
+    unsubmittedWeeks,
+    totalWeeksBehind: unsubmittedWeeks.length,
+    targetWeek,
+  };
+}
+
+export const pendingSimpklPrompts = new Map();
+
+/**
+ * Mulai alur interaktif submit: cek tracking, fetch commit Senin, dan tanya kalimat 4 hari ke user
+ */
+export async function startSimpklSubmitPrompt(ctx, targetMondayOverride = null) {
+  const userId = String(ctx.from?.id || 'default');
+  const tracking = getSimpklWorkweekTracking();
+
+  if (tracking.totalWeeksBehind === 0 && !targetMondayOverride) {
+    let text = `<b>[ STATUS JURNAL SIMPKL: UP-TO-DATE ]</b>\n\n`;
+    text += `Seluruh jurnal hingga minggu ini sudah lengkap terisi dan tercatat di sistem.\n`;
+    text += `Terakhir Tercatat: <b>${tracking.lastSubmittedDate || 'Tidak ada'}</b>\n\n`;
+    text += `Jika ingin mengisi ulang minggu tertentu, gunakan perintah:\n`;
+    text += `<code>/simpkl 5days YYYY-MM-DD</code>`;
+
+    const keyboard = new InlineKeyboard()
+      .text('[ Date Picker ]', 'simpkl_cal_open')
+      .text('[ Riwayat Jurnal ]', 'simpkl_history')
+      .row()
+      .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+    return await safeEditOrReply(ctx, text, keyboard);
+  }
+
+  let targetWeek = tracking.targetWeek;
+  if (targetMondayOverride) {
+    const found = tracking.unsubmittedWeeks.find((w) => w.monday === targetMondayOverride);
+    if (found) {
+      targetWeek = found;
+    } else {
+      const monStr = targetMondayOverride;
+      const monDate = new Date(monStr);
+      const friDate = new Date(monDate);
+      friDate.setDate(friDate.getDate() + 4);
+      targetWeek = {
+        monday: monStr,
+        friday: friDate.toISOString().split('T')[0],
+        missingDays: 5,
+        isCurrent: false,
+        isPrevious: false,
+        label: `${monStr} s.d. ${friDate.toISOString().split('T')[0]}`,
+      };
+    }
+  }
+
+  if (!targetWeek) {
+    const curMon = getMondayOfDate();
+    const curFriObj = new Date(curMon);
+    curFriObj.setDate(curFriObj.getDate() + 4);
+    targetWeek = {
+      monday: curMon,
+      friday: curFriObj.toISOString().split('T')[0],
+      missingDays: 5,
+      isCurrent: true,
+      isPrevious: false,
+      label: `${curMon} s.d. ${curFriObj.toISOString().split('T')[0]} (Minggu Ini)`,
+    };
+  }
+
+  const targetMonday = targetWeek.monday;
+  const targetFriday = targetWeek.friday;
+
+  await safeEditOrReply(
+    ctx,
+    `<b>[ MEMERIKSA TRACKING ]</b> Mengambil commit GitHub hari Senin <code>${targetMonday}</code>...`
+  );
+
+  let mondaySummary = '';
+  let mondayCommits = [];
+  try {
+    const fetchRes = await fetchSingleDateNode(targetMonday);
+    mondaySummary = fetchRes.summary || '';
+    mondayCommits = fetchRes.commits || [];
+  } catch {
+    const fetchRes = await runSimpklRunner('fetch', { date: targetMonday }).catch(() => null);
+    mondaySummary = fetchRes?.summary || '';
+    mondayCommits = fetchRes?.commits || [];
+  }
+
+  if (!mondaySummary) {
+    mondaySummary = 'Melakukan pengembangan pada proyek cafe-pos, perbaikan form barang, dan pengujian modul kasir.';
+  }
+
+  pendingSimpklPrompts.set(userId, {
+    targetMonday,
+    targetFriday,
+    mondaySummary,
+    mondayCommits,
+    targetWeekLabel: targetWeek.label,
+    totalWeeksBehind: tracking.totalWeeksBehind,
+    timestamp: Date.now(),
+  });
+
+  let text = `<b>[ TRACKING URUTAN JURNAL SIMPKL ]</b>\n\n`;
+  text += `Status Riwayat:\n`;
+  text += `• Terakhir Disubmit: <b>${tracking.lastSubmittedDate || 'Belum ada'}</b>\n`;
+  text += `• Minggu Belum Disubmit: <b>${tracking.totalWeeksBehind} Minggu Tertinggal</b>\n`;
+  text += `• Target Antrean Urutan: <b>${escapeHtml(targetWeek.label)}</b>\n\n`;
+
+  text += `<b>Aktivitas Commit Senin (${targetMonday}):</b>\n`;
+  text += `<i>${escapeHtml(mondaySummary)}</i>\n\n`;
+
+  text += `<b>untuk 4 hari mau di isi apa putra ?</b>\n`;
+  text += `<i>(Ketik 1 kalimat langsung di chat untuk mengisi Selasa s.d. Jumat)</i>`;
+
+  const keyboard = new InlineKeyboard();
+
+  keyboard
+    .text('[ Template Testing ]', `simpkl_quick_sentence:${targetMonday}:testing`)
+    .text('[ Template Refactor ]', `simpkl_quick_sentence:${targetMonday}:refactor`)
+    .row();
+
+  if (tracking.unsubmittedWeeks.length > 1) {
+    const otherWeeks = tracking.unsubmittedWeeks.filter((w) => w.monday !== targetMonday);
+    otherWeeks.slice(0, 2).forEach((ow) => {
+      const shortLabel = ow.isCurrent ? 'Minggu Ini' : (ow.isPrevious ? 'Minggu Lalu' : ow.monday);
+      keyboard.text(`[ Target: ${shortLabel} ]`, `simpkl_submit_target:${ow.monday}`);
+    });
+    keyboard.row();
+  }
+
+  keyboard
+    .text('[ Batalkan ]', 'simpkl_cancel_prompt')
+    .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+  return await safeEditOrReply(ctx, text, keyboard);
+}
+
+/**
+ * Tangani balasan 1 kalimat dari user untuk mengisi 4 hari kerja sisa
+ */
+export async function handleSimpklUserReply({ ctx, userId, text, prompt = null }) {
+  const activePrompt = prompt || pendingSimpklPrompts.get(String(userId));
+  if (!activePrompt) return false;
+
+  pendingSimpklPrompts.delete(String(userId));
+
+  const { targetMonday, mondaySummary, targetWeekLabel, totalWeeksBehind } = activePrompt;
+  const startDt = new Date(targetMonday);
+  const items = [];
+  const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  for (let i = 0; i < 5; i++) {
+    const cur = new Date(startDt);
+    cur.setDate(cur.getDate() + i);
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, '0');
+    const d = String(cur.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    const day = DAY_NAMES[cur.getDay()];
+
+    const summary = i === 0 ? mondaySummary : text;
+    items.push({
+      date: dateStr,
+      day,
+      has_commits: i === 0,
+      commit_count: i === 0 ? (activePrompt.mondayCommits?.length || 1) : 0,
+      summary,
+      already_submitted: false,
+      previous_catatan: '',
+    });
+  }
+
+  batchDrafts.set(String(userId), {
+    startDate: targetMonday,
+    items,
+    mode: 'Input 1 Kalimat Putra',
+  });
+
+  let replyText = `<b>[ DRAF 5 HARI SIAP SUBMIT ]</b>\n\n`;
+  replyText += `Periode: <b>${items[0].date} s.d. ${items[4].date}</b>\n`;
+  replyText += `Urutan Antrean: <b>${escapeHtml(targetWeekLabel)}</b>\n`;
+  replyText += `Status: <b>Sisa ${totalWeeksBehind} Minggu Belum Disubmit</b>\n\n`;
+
+  replyText += `<b>1. ${items[0].date} (Senin)</b> [Dari Commit GitHub]\n`;
+  replyText += `<i>${escapeHtml(items[0].summary)}</i>\n\n`;
+
+  for (let i = 1; i < 5; i++) {
+    replyText += `<b>${i + 1}. ${items[i].date} (${items[i].day})</b> [Dari Balasan Kamu]\n`;
+    replyText += `<i>${escapeHtml(items[i].summary)}</i>\n\n`;
+  }
+
+  replyText += `Periksa catatan di atas. Tekan tombol di bawah untuk langsung mengirim kelima jurnal ini ke portal SIMPKL:`;
+
+  const keyboard = new InlineKeyboard()
+    .text('[ Kirim 5 Jurnal Ini ke SIMPKL ]', `simpkl_batch_submit:${targetMonday}`)
+    .row()
+    .text('[ Ubah Kalimat 4 Hari ]', `simpkl_submit_target:${targetMonday}`)
+    .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+  try {
+    return await ctx.reply(replyText, {
+      parse_mode: 'HTML',
+      reply_markup: keyboard,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Message interceptor untuk menangkap 1 kalimat balasan dari user
+ */
+export async function handleSimpklMessageInterceptor({ ctx, userId, chatId, text, reply }) {
+  if (!text) return false;
+  const prompt = pendingSimpklPrompts.get(String(userId));
+  if (!prompt) return false;
+
+  const trimmed = text.trim();
+
+  if (trimmed === '/batal' || trimmed === '/cancel' || trimmed.toLowerCase() === 'batal' || trimmed.toLowerCase() === 'cancel') {
+    pendingSimpklPrompts.delete(String(userId));
+    if (reply) {
+      await reply('Pengisian draf jurnal dibatalkan.');
+    }
+    return true;
+  }
+
+  if (trimmed.startsWith('/') || trimmed.startsWith('.')) {
+    pendingSimpklPrompts.delete(String(userId));
+    return false;
+  }
+
+  await handleSimpklUserReply({ ctx, userId: String(userId), text: trimmed, prompt });
+  return true;
+}
+
+/**
  * Build interactive Calendar Date Picker (NO EMOJIS)
  */
 export function buildDatePicker(year, month, submittedDates = new Set()) {
@@ -454,10 +762,16 @@ export function buildDatePicker(year, month, submittedDates = new Set()) {
  * Build Main SIMPKL Menu Dashboard (NO EMOJIS)
  */
 export function buildSimpklMainMenu() {
+  const tracking = getSimpklWorkweekTracking();
+  const behindLabel = tracking.totalWeeksBehind > 0
+    ? `(${tracking.totalWeeksBehind} Minggu Tertinggal)`
+    : '(Up-To-Date)';
+
   const keyboard = new InlineKeyboard()
-    .text('[ Buka Date Picker / Kalender ]', 'simpkl_cal_open')
+    .text(`[ Submit Jurnal Urut ${behindLabel} ]`, 'simpkl_submit_flow:auto')
     .row()
-    .text('[ Submit Batch 5 Hari Kerja ]', 'simpkl_batch_menu')
+    .text('[ Buka Date Picker / Kalender ]', 'simpkl_cal_open')
+    .text('[ Submit Batch 5 Hari ]', 'simpkl_batch_menu')
     .row()
     .text('[ Jurnal Hari Ini ]', 'simpkl_today')
     .text('[ Jurnal Kemarin ]', 'simpkl_yesterday')
@@ -469,8 +783,14 @@ export function buildSimpklMainMenu() {
 
   let text = `<b>[ SISTEM AUTO-FILLER JURNAL SIMPKL ]</b>\n\n`;
   text += `Target Portal: <code>pkl.smk1bws.sch.id</code>\n`;
-  text += `Engine: GitHub Commits Summarizer + Selenium Headless\n\n`;
-  text += `Pilih salah satu menu di bawah ini:`;
+  text += `Status Urutan: <b>${tracking.totalWeeksBehind} Minggu Belum Disubmit</b>\n`;
+  if (tracking.lastSubmittedDate) {
+    text += `Terakhir Disubmit: <b>${tracking.lastSubmittedDate}</b>\n`;
+  }
+  if (tracking.targetWeek) {
+    text += `Antrean Berikutnya: <b>${escapeHtml(tracking.targetWeek.label)}</b>\n`;
+  }
+  text += `\nPilih salah satu menu di bawah ini:`;
 
   return { text, keyboard };
 }
@@ -777,9 +1097,24 @@ export async function handleBatchSubmit(ctx, startDate) {
       text += `• <b>${r.date}</b>: [${r.status.toUpperCase()}] - ${escapeHtml(r.message)}\n`;
     });
 
-    text += `\nSeluruh jurnal yang berhasil telah tersimpan di portal SIMPKL dan dicatat ke history.`;
+    text += `\nSeluruh jurnal yang berhasil telah tersimpan di portal SIMPKL dan dicatat ke history.\n\n`;
 
-    const keyboard = new InlineKeyboard()
+    const updatedTracking = getSimpklWorkweekTracking();
+    if (updatedTracking.totalWeeksBehind > 0) {
+      text += `<b>Status Antrean Urutan Terbaru:</b>\n`;
+      text += `• Sisa Tertinggal: <b>${updatedTracking.totalWeeksBehind} Minggu Belum Disubmit</b>\n`;
+      text += `• Antrean Berikutnya: <b>${escapeHtml(updatedTracking.targetWeek?.label || '')}</b>\n\n`;
+      text += `Tekan tombol di bawah untuk lanjut mengisi minggu berikutnya secara urut:`;
+    } else {
+      text += `<b>[ SEMUA JURNAL TELAH UP-TO-DATE ]</b>\n`;
+      text += `Selamat! Seluruh minggu jurnal SIMPKL hingga minggu ini telah lengkap tersimpan.`;
+    }
+
+    const keyboard = new InlineKeyboard();
+    if (updatedTracking.totalWeeksBehind > 0) {
+      keyboard.text('[ Lanjut Submit Minggu Berikutnya ]', 'simpkl_submit_flow:auto').row();
+    }
+    keyboard
       .text('[ Date Picker ]', 'simpkl_cal_open')
       .text('[ Riwayat Jurnal ]', 'simpkl_history')
       .row()
@@ -815,6 +1150,41 @@ export async function handleSimpklCallback(ctx, data) {
     const submitted = getSubmittedDatesSet();
     const cal = buildDatePicker(now.getFullYear(), now.getMonth() + 1, submitted);
     return await safeEditOrReply(ctx, cal.text, cal.keyboard);
+  }
+
+  if (data === 'simpkl_cancel_prompt') {
+    pendingSimpklPrompts.delete(userId);
+    let text = `<b>[ PENGISIAN DRAF DIBATALKAN ]</b>\n\nSesi pengisian draf jurnal telah dibatalkan.`;
+    const keyboard = new InlineKeyboard()
+      .text('[ Menu SIMPKL ]', 'simpkl_menu')
+      .text('[ Date Picker ]', 'simpkl_cal_open');
+    return await safeEditOrReply(ctx, text, keyboard);
+  }
+
+  if (data === 'simpkl_submit_flow:auto') {
+    return await startSimpklSubmitPrompt(ctx);
+  }
+
+  if (data === 'simpkl_submit_flow:prev') {
+    const prevMonObj = new Date(getMondayOfDate());
+    prevMonObj.setDate(prevMonObj.getDate() - 7);
+    const prevMonStr = prevMonObj.toISOString().split('T')[0];
+    return await startSimpklSubmitPrompt(ctx, prevMonStr);
+  }
+
+  if (data.startsWith('simpkl_submit_target:')) {
+    const targetDate = data.replace('simpkl_submit_target:', '');
+    return await startSimpklSubmitPrompt(ctx, targetDate);
+  }
+
+  if (data.startsWith('simpkl_quick_sentence:')) {
+    const parts = data.split(':');
+    const type = parts[2] || parts[1];
+    let sentence = 'Melakukan pengujian fungsional fitur kasir, cetak struk nota belanja, dan pemeliharaan aplikasi cafe-pos.';
+    if (type === 'refactor') {
+      sentence = 'Melakukan refactoring kode controller, optimasi query database stok, dan penanganan bug.';
+    }
+    return await handleSimpklUserReply({ ctx, userId, text: sentence });
   }
 
   if (data === 'simpkl_batch_menu') {
@@ -1156,6 +1526,31 @@ export function registerSimpklCommands() {
           startDate = paramDate;
         }
         return await handleBatchSelection(ctx, startDate);
+      }
+
+      // /simpkl submit [auto | next | prev | lastweek | minggulalu | thisweek | YYYY-MM-DD]
+      if (sub === 'submit' || sub === 'kirim' || sub === 'isi' || sub === 'urut') {
+        const opt = (args[1] || '').toLowerCase();
+
+        if (opt === 'prev' || opt === 'lastweek' || opt === 'minggulalu') {
+          const prevMonObj = new Date(getMondayOfDate());
+          prevMonObj.setDate(prevMonObj.getDate() - 7);
+          const prevMonStr = prevMonObj.toISOString().split('T')[0];
+          return await startSimpklSubmitPrompt(ctx, prevMonStr);
+        }
+
+        if (opt === 'thisweek' || opt === 'current' || opt === 'mingguini') {
+          const curMonStr = getMondayOfDate();
+          return await startSimpklSubmitPrompt(ctx, curMonStr);
+        }
+
+        if (/^\d{4}-\d{2}-\d{2}$/.test(opt)) {
+          const monStr = getMondayOfDate(opt);
+          return await startSimpklSubmitPrompt(ctx, monStr);
+        }
+
+        // Default: otomatis mendeteksi tracking riwayat dan mengambil antrean urutan berikutnya
+        return await startSimpklSubmitPrompt(ctx);
       }
 
       // /simpkl loop <catatan> atau /simpkl 4days <catatan>

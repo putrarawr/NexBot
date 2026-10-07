@@ -53,6 +53,9 @@ import {
   renderBatchDraftMessage,
   LOOP_PRESETS,
   VARY_PACKAGES,
+  getSimpklWorkweekTracking,
+  pendingSimpklPrompts,
+  handleSimpklMessageInterceptor,
 } from '../src/modules/simpkl/index.js';
 let passedTests = 0;
 let failedTests = 0;
@@ -942,6 +945,55 @@ async function runAllTests() {
     assert.notEqual(varied.items[1].summary, varied.items[2].summary, 'Tuesday and Wednesday notes should be different');
     assert.notEqual(varied.items[2].summary, varied.items[3].summary, 'Wednesday and Thursday notes should be different');
     assert.notEqual(varied.items[3].summary, varied.items[4].summary, 'Thursday and Friday notes should be different');
+  });
+
+  await test('getSimpklWorkweekTracking computes unsubmitted weeks and target queue in order', () => {
+    const tracking = getSimpklWorkweekTracking();
+    assert.ok(typeof tracking.totalWeeksBehind === 'number', 'totalWeeksBehind must be a number');
+    assert.ok(Array.isArray(tracking.unsubmittedWeeks), 'unsubmittedWeeks must be an array');
+    if (tracking.totalWeeksBehind > 0) {
+      assert.ok(tracking.targetWeek, 'targetWeek must be defined when weeks are behind');
+      assert.ok(tracking.targetWeek.monday, 'targetWeek must have a monday date');
+      assert.ok(tracking.targetWeek.friday, 'targetWeek must have a friday date');
+    }
+  });
+
+  await test('handleSimpklMessageInterceptor intercepts 1-sentence reply and applies to 4 days', async () => {
+    const testUserId = 'test-putra-99';
+    pendingSimpklPrompts.set(testUserId, {
+      targetMonday: '2026-09-28',
+      targetFriday: '2026-10-02',
+      mondaySummary: 'Commit Senin dari repo cafe-pos',
+      mondayCommits: [{ sha: 'abc1234' }],
+      targetWeekLabel: '2026-09-28 s.d. 2026-10-02 (Minggu Lalu)',
+      totalWeeksBehind: 2,
+      timestamp: Date.now(),
+    });
+
+    let sentText = '';
+    const mockCtx = {
+      reply: async (text) => {
+        sentText = text;
+        return { message_id: 123 };
+      },
+    };
+
+    const intercepted = await handleSimpklMessageInterceptor({
+      ctx: mockCtx,
+      userId: testUserId,
+      chatId: 12345,
+      text: 'melakukan pengujian modul transaksi kasir dan cetak struk',
+    });
+
+    assert.equal(intercepted, true, 'Interceptor should handle the message');
+    assert.equal(pendingSimpklPrompts.has(testUserId), false, 'Prompt should be cleared after handling');
+    assert.ok(sentText.includes('DRAF 5 HARI SIAP SUBMIT'), 'Must generate confirmation draft message');
+    assert.ok(sentText.includes('Commit Senin dari repo cafe-pos'), 'Monday note from GitHub must be preserved');
+    assert.ok(sentText.includes('melakukan pengujian modul transaksi kasir dan cetak struk'), '4 days note must be applied');
+
+    // Strict ZERO EMOJI check on interceptor reply text
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+    assert.equal(emojiRegex.test(sentText), false, 'Reply confirmation text must not contain emojis');
   });
 
   // Summary
