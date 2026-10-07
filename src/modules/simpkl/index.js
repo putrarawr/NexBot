@@ -246,6 +246,33 @@ export function saveSimpklCredentials(username, password) {
 }
 
 /**
+ * Save SIMPKL session cookie (ci_session) directly
+ */
+export function saveSimpklSessionCookie(cookieValue) {
+  const cookieData = [
+    {
+      name: 'ci_session',
+      value: cookieValue.trim(),
+      domain: 'pkl.smk1bws.sch.id',
+      path: '/',
+      secure: true,
+      httpOnly: true,
+    },
+  ];
+  const fileDir = path.dirname(fileURLToPath(import.meta.url));
+  const targets = [
+    path.resolve(process.cwd(), 'data/simpkl_cookies.json'),
+    path.resolve(fileDir, 'scripts/simpkl_cookies.json'),
+  ];
+  for (const t of targets) {
+    try {
+      fs.mkdirSync(path.dirname(t), { recursive: true });
+      fs.writeFileSync(t, JSON.stringify(cookieData, null, 2), 'utf-8');
+    } catch {}
+  }
+}
+
+/**
  * Execute simpkl_runner.py and parse JSON output
  */
 export async function runSimpklRunner(action, params = {}) {
@@ -2007,6 +2034,28 @@ export function registerSimpklCommands() {
           parse_mode: 'HTML',
           reply_markup: keyboard,
         });
+      }
+
+      // /simpkl cookie [ci_session_value]
+      if (sub === 'cookie' || sub === 'session') {
+        const cookieVal = args[1]?.trim();
+        if (cookieVal) {
+          saveSimpklSessionCookie(cookieVal);
+          return await ctx.reply(
+            `<b>[ SESSION COOKIE DISIMPAN ]</b>\n\n` +
+            `Cookie sesi <code>ci_session</code> berhasil disimpan.\n` +
+            `Bot sekarang dapat membuka portal SIMPKL secara instan menggunakan sesi aktif ini tanpa hambatan challenge Turnstile.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        return await ctx.reply(
+          `<b>[ CARA INPUT COOKIE SIMPKL ]</b>\n\n` +
+          `Jika Turnstile pada server terhambat verifikasi bot, kamu bisa memasukkan cookie sesi langsung:\n\n` +
+          `Format:\n<code>/simpkl cookie &lt;nilai_ci_session&gt;</code>\n\n` +
+          `Nilai <i>ci_session</i> dapat dilihat di browser setelah login pada menu Inspect &gt; Application &gt; Cookies &gt; pkl.smk1bws.sch.id.`,
+          { parse_mode: 'HTML' }
+        );
       }
 
       // Default: Buka Menu Utama SIMPKL

@@ -36,6 +36,7 @@ class SIMPKLBot:
         # Chrome runs in standard display mode so Turnstile solves reliably in 3-4 seconds.
         has_real_display = bool(os.environ.get("DISPLAY"))
         use_virtual_display = False
+        self.xvfb_proc = None
 
         if not has_real_display:
             try:
@@ -43,9 +44,23 @@ class SIMPKLBot:
                 self.display = Display(visible=False, size=(1280, 900))
                 self.display.start()
                 use_virtual_display = True
-                print("  Virtual display (Xvfb) berhasil diaktifkan.")
-            except Exception:
-                self.display = None
+                print("  Virtual display (Xvfb via pyvirtualdisplay) berhasil diaktifkan.")
+            except Exception as e1:
+                try:
+                    import subprocess
+                    display_num = ":99"
+                    self.xvfb_proc = subprocess.Popen(
+                        ["Xvfb", display_num, "-screen", "0", "1280x900x24", "-nolisten", "tcp"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    time.sleep(1)
+                    os.environ["DISPLAY"] = display_num
+                    use_virtual_display = True
+                    print(f"  Virtual display (Xvfb native {display_num}) berhasil diaktifkan.")
+                except Exception as e2:
+                    print(f"  [!] Virtual display tidak aktif: {e1} / {e2}")
+                    self.display = None
 
         should_use_chrome_headless = headless and not has_real_display and not use_virtual_display
         self.is_headless = should_use_chrome_headless
@@ -513,9 +528,16 @@ class SIMPKLBot:
                     self.display.stop()
                 except Exception:
                     pass
+            if hasattr(self, "xvfb_proc") and self.xvfb_proc:
+                try:
+                    self.xvfb_proc.terminate()
+                except Exception:
+                    pass
 
-    def _wait_for_turnstile(self, timeout: int = 30):
+    def _wait_for_turnstile(self, timeout: int = 40):
         """Wait for Cloudflare Turnstile challenge to auto-resolve."""
+        from selenium.webdriver.common.action_chains import ActionChains
+
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -531,6 +553,16 @@ class SIMPKLBot:
                         return True
             except Exception:
                 pass
+
+            # If not yet resolved after 3s, click the Turnstile checkbox widget at offset (28, 32)
+            elapsed = time.time() - start
+            if elapsed >= 3 and int(elapsed) % 4 == 0:
+                try:
+                    cf_divs = self.driver.find_elements(By.CSS_SELECTOR, ".cf-turnstile")
+                    if cf_divs:
+                        ActionChains(self.driver).move_to_element_with_offset(cf_divs[0], 28, 32).click().perform()
+                except Exception:
+                    pass
 
             time.sleep(1)
 
