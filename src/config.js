@@ -92,5 +92,11 @@ export function saveConfig() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(activeConfig, null, 2), 'utf-8');
+  const toSave = { ...activeConfig };
+  // Never persist secrets into tracked config.json
+  toSave.telegramBotToken = '';
+  toSave.simpklPassword = '';
+  toSave.groqApiKey = '';
+  toSave.geminiApiKey = '';
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(toSave, null, 2), 'utf-8');
 }

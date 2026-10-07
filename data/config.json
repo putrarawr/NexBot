@@ -21,7 +21,7 @@
   "groqApiKey": "",
   "geminiApiKey": "",
   "telegramBotToken": "",
-  "telegramOwnerId": "",
+  "telegramOwnerId": "8244607780",
   "enableWhatsApp": true,
   "enableTelegram": true,
   "simpklUsername": "",
