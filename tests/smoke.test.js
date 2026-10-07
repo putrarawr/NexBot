@@ -41,6 +41,7 @@ import { isCommandSupported } from '../src/bot/handler.js';
 import { registerUtilityTools } from '../src/modules/tools/index.js';
 import { registerVeriftokCommands, extractTikTokUrl, formatScoreBar } from '../src/modules/veriftok/index.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, playRpsRound } from '../src/modules/game/visual-games.js';
+import { registerSimpklCommands, buildDatePicker, buildSimpklMainMenu } from '../src/modules/simpkl/index.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -148,6 +149,7 @@ async function runAllTests() {
     registerGroupCommands();
     registerUtilityTools();
     registerVeriftokCommands();
+    registerSimpklCommands();
 
     const expectedCommands = [
       'ping', 'clear', 'menu',
@@ -161,7 +163,7 @@ async function runAllTests() {
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc', 'qrcode', 'ssweb', 'lirik',
       'hidetag', 'tagall', 'kick', 'add', 'promote', 'demote', 'group', 'linkgc', 'revoke', 'antilink', 'afk',
       'groupmode', 'setowner', 'owner',
-      'veriftok',
+      'veriftok', 'simpkl',
     ];
 
     for (const cmd of expectedCommands) {
@@ -817,6 +819,49 @@ async function runAllTests() {
     assert.equal(capturedPayload.contextInfo.externalAdReply.body, 'Queen • Spotify');
     assert.equal(capturedPayload.contextInfo.externalAdReply.renderLargerThumbnail, true);
     assert.equal(capturedPayload.contextInfo.externalAdReply.sourceUrl, 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv');
+  });
+
+  // 8. SIMPKL Auto-Filler & Date Picker
+  console.log('\n📅 8. SIMPKL Auto-Filler & Interactive Date Picker:');
+  await test('buildDatePicker generates complete monthly calendar without any emojis', () => {
+    const submitted = new Set(['2026-10-01', '2026-10-05', '2026-10-07']);
+    const picker = buildDatePicker(2026, 10, submitted);
+
+    // Text & formatting checks
+    assert.ok(picker.text.includes('Oktober 2026'));
+    assert.ok(picker.text.includes('DATE PICKER'));
+    assert.ok(picker.keyboard, 'Should have InlineKeyboard');
+
+    const json = JSON.stringify(picker.keyboard);
+    // Navigation checks
+    assert.ok(json.includes('simpkl_cal:2026:9'), 'Prev month button');
+    assert.ok(json.includes('simpkl_cal:2026:11'), 'Next month button');
+    assert.ok(json.includes('simpkl_pick:2026-10-07'), 'Date pick callback for 07');
+
+    // Submitted asterisk check
+    assert.ok(json.includes('07*'), 'Submitted date 07 should have asterisk');
+    assert.ok(json.includes('08'), 'Unsubmitted date 08 should NOT have asterisk');
+
+    // STRICT ZERO EMOJI CHECK
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+    assert.equal(emojiRegex.test(picker.text), false, 'Date picker text must not contain emojis');
+    assert.equal(emojiRegex.test(json), false, 'Date picker keyboard buttons must not contain emojis');
+  });
+
+  await test('buildSimpklMainMenu generates main menu dashboard without any emojis', () => {
+    const menu = buildSimpklMainMenu();
+    assert.ok(menu.text.includes('SIMPKL'));
+    assert.ok(menu.keyboard);
+
+    const json = JSON.stringify(menu.keyboard);
+    assert.ok(json.includes('simpkl_cal_open'), 'Should have button to open Date Picker');
+    assert.ok(json.includes('simpkl_today'), 'Should have button for today');
+    assert.ok(json.includes('simpkl_history'), 'Should have button for history');
+
+    // STRICT ZERO EMOJI CHECK
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+    assert.equal(emojiRegex.test(menu.text), false, 'Main menu text must not contain emojis');
+    assert.equal(emojiRegex.test(json), false, 'Main menu keyboard buttons must not contain emojis');
   });
 
   // Summary

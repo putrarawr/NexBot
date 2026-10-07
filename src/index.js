@@ -18,6 +18,7 @@ import { registerGroupCommands } from './modules/group/index.js';
 import { registerTelegramExclusiveCommands } from './modules/telegram/index.js';
 import { registerUtilityTools } from './modules/tools/index.js';
 import { registerVeriftokCommands } from './modules/veriftok/index.js';
+import { registerSimpklCommands } from './modules/simpkl/index.js';
 
 async function bootstrap() {
   console.clear?.();
@@ -41,7 +42,8 @@ async function bootstrap() {
   registerTelegramExclusiveCommands();
   registerUtilityTools();
   registerVeriftokCommands();
-  logger.info('Semua modul perintah (Game, OSINT, AI, Pemrograman, Media, Downloader, Grup, VerifTok) aktif.');
+  registerSimpklCommands();
+  logger.info('Semua modul perintah (Game, OSINT, AI, Pemrograman, Media, Downloader, Grup, VerifTok, SIMPKL) aktif.');
 
   // 3. Jalankan Web Server Dashboard
   const app = createWebServer();

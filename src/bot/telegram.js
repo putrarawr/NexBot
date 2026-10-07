@@ -10,6 +10,7 @@ import { handleGameInput } from '../modules/game/index.js';
 import { tebakGambarList } from '../modules/game/questions.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, visualSessions, buildRpsKeyboard, playRpsRound } from '../modules/game/visual-games.js';
 import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, cancelMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
+import { handleSimpklCallback } from '../modules/simpkl/index.js';
 import {
   findSuggestions,
   formatAutocompleteMessage,
@@ -255,6 +256,9 @@ export function buildTelegramMainMenu(pushName) {
     .row()
     .text('[ DADU & CASINO ]', 'menu_cat:dice_picker')
     .text('[ SEMUA PERINTAH ]', 'menu_all')
+    .row()
+    .text('[ AUTO-FILLER SIMPKL ]', 'simpkl_menu')
+    .text('[ DATE PICKER JURNAL ]', 'simpkl_cal_open')
     .row()
     .text('[ PINTASAN CEPAT ]', 'quick_buttons')
     .text('[ PROFIL SAYA ]', 'quick_whoami');
@@ -629,6 +633,12 @@ export async function handleTelegramCallback(_bot, ctx) {
     const userId = String(user?.id || 'unknown');
     const callbackChatId = ctx.callbackQuery?.message?.chat?.id || ctx.chat?.id;
     const chatId = String(callbackChatId || userId);
+
+    // 0a. SIMPKL Auto-Filler & Date Picker callbacks
+    if (data.startsWith('simpkl_')) {
+      await handleSimpklCallback(ctx, data);
+      return;
+    }
 
     // 0. Music search selection
     if (data.startsWith('music_pick:')) {
