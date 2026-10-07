@@ -334,12 +334,41 @@ export function registerDownloaderCommands() {
             keyboard.text('[ BATAL ]', `music_cancel:${token}`);
             await ctx.reply(card, { parse_mode: 'HTML', reply_markup: keyboard });
           } else {
-            let menu = `[ MUSIC SEARCH ]\n\nHasil untuk: ${query}\n\n`;
+            let menu = `╭─── 🎵 SPOTIFY MUSIC SEARCH ───╮\n`;
+            menu += `│ Hasil pencarian: *${query}*\n`;
+            menu += `╰───────────────────────────────╯\n\n`;
             candidates.forEach((candidate, index) => {
-              menu += `[${index + 1}] ${candidate.title}\n    ${candidate.artist}${candidate.duration ? ` • ${candidate.duration}` : ''}\n`;
+              menu += `*${index + 1}.* *${candidate.title}*\n`;
+              menu += `   👤 _${candidate.artist}_${candidate.duration ? ` • ⏱️ ${candidate.duration}` : ''}\n\n`;
             });
-            menu += '\nBalas dengan angka 1 sampai 5 untuk memutar lagu.';
-            await reply(menu);
+            menu += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            menu += `💡 _Balas angka 1 sampai ${candidates.length} untuk memutar lagu._`;
+
+            let firstThumbBuffer = null;
+            if (candidates[0]?.thumbnail) {
+              try {
+                const thumbRes = await fetch(candidates[0].thumbnail, { signal: AbortSignal.timeout(4000) });
+                if (thumbRes.ok) {
+                  firstThumbBuffer = Buffer.from(await thumbRes.arrayBuffer());
+                }
+              } catch {}
+            }
+
+            const searchPayload = { text: menu };
+            if (firstThumbBuffer) {
+              searchPayload.contextInfo = {
+                externalAdReply: {
+                  title: '🎵 SPOTIFY MUSIC SEARCH',
+                  body: `Ditemukan ${candidates.length} lagu untuk "${query}"`,
+                  sourceUrl: `https://open.spotify.com/search/${encodeURIComponent(query)}`,
+                  thumbnail: firstThumbBuffer,
+                  mediaType: 1,
+                  renderLargerThumbnail: true,
+                  showAdAttribution: true,
+                },
+              };
+            }
+            await sock.sendMessage(jid, searchPayload);
           }
           return;
         }

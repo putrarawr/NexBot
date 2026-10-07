@@ -121,6 +121,7 @@ export async function searchMusicTracks(query, limit = 5) {
           title: title.trim(),
           artist: (channel !== 'NA' && channel) || (uploader !== 'NA' && uploader) || 'Unknown Artist',
           duration: duration !== 'NA' ? duration : '',
+          thumbnail: id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null,
         };
       })
       .filter((candidate) => candidate.url && candidate.title)
@@ -142,6 +143,7 @@ async function safeUnlink(...filePaths) {
 export async function downloadMusicTrack(target, metadata = {}) {
   let searchTerm = String(target || '').trim();
   let spotifyMeta = null;
+  let itunesMeta = null;
   const isSpotifyUrl = /spotify\.com\/track\/[a-zA-Z0-9]+/i.test(searchTerm);
   const isDirectMediaUrl = /^https?:\/\//i.test(searchTerm) && !isSpotifyUrl;
 
@@ -155,6 +157,24 @@ export async function downloadMusicTrack(target, metadata = {}) {
         if (spotifyMeta.title) searchTerm = spotifyMeta.title;
       }
     } catch {}
+  } else {
+    // Ambil metadata & HD album art resmi dari Apple / iTunes
+    const cleanSearch = (metadata.title || searchTerm).replace(/https?:\/\/\S+/g, '').trim();
+    if (cleanSearch) {
+      try {
+        const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearch)}&entity=song&limit=1`, {
+          signal: AbortSignal.timeout(6000),
+        });
+        if (itunesRes.ok) {
+          const itunesJson = await itunesRes.json();
+          if (itunesJson.results && itunesJson.results.length > 0) {
+            itunesMeta = itunesJson.results[0];
+          }
+        }
+      } catch (err) {
+        logger.debug('iTunes album art fetch fallback:', err.message);
+      }
+    }
   }
 
   const rand = Math.random().toString(36).slice(2, 8);
@@ -197,10 +217,23 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const buffer = fs.readFileSync(downloadedPath);
   await safeUnlink(downloadedPath);
 
+  const resolvedTitle = metadata.title || spotifyMeta?.title || itunesMeta?.trackName || searchTerm;
+  const resolvedArtist = metadata.artist || spotifyMeta?.author_name || itunesMeta?.artistName || 'Spotify Music';
+  const resolvedThumbnail =
+    spotifyMeta?.thumbnail_url ||
+    itunesMeta?.artworkUrl100?.replace('100x100bb', '600x600bb') ||
+    metadata.thumbnail ||
+    (metadata.id ? `https://i.ytimg.com/vi/${metadata.id}/hqdefault.jpg` : null);
+
+  const resolvedSourceUrl = isSpotifyUrl
+    ? searchTerm
+    : (itunesMeta?.trackViewUrl || metadata.url || `https://open.spotify.com/search/${encodeURIComponent(`${resolvedTitle} ${resolvedArtist}`)}`);
+
   return {
-    title: metadata.title || spotifyMeta?.title || searchTerm,
-    artist: metadata.artist || spotifyMeta?.author_name || 'Spotify Audio',
-    thumbnail: spotifyMeta?.thumbnail_url || null,
+    title: resolvedTitle,
+    artist: resolvedArtist,
+    thumbnail: resolvedThumbnail,
+    sourceUrl: resolvedSourceUrl,
     buffer,
     size: stat.size,
   };
@@ -209,20 +242,65 @@ export async function downloadMusicTrack(target, metadata = {}) {
 export async function sendMusicAudio({ platform, ctx, sock, jid, track }) {
   const title = String(track.title || 'Lagu').slice(0, 120);
   const artist = String(track.artist || 'Unknown Artist').slice(0, 80);
-  const caption = `[ MUSIC ]\n${title}\n${artist}`;
+  const sourceUrl = track.sourceUrl || `https://open.spotify.com/search/${encodeURIComponent(`${title} ${artist}`)}`;
 
+  // Download thumbnail buffer jika tersedia untuk cover art
+  let coverBuffer = null;
+  if (track.thumbnail) {
+    try {
+      const coverRes = await fetch(track.thumbnail, { signal: AbortSignal.timeout(6000) });
+      if (coverRes.ok) {
+        coverBuffer = Buffer.from(await coverRes.arrayBuffer());
+      }
+    } catch (err) {
+      logger.debug('Gagal download cover album music:', err.message);
+    }
+  }
+
+  // 1. Respon Telegram
   if (platform === 'telegram' && ctx?.replyWithAudio) {
-    return ctx.replyWithAudio(new InputFile(track.buffer, `${title.replace(/[^a-z0-9 _-]/gi, '').trim() || 'audio'}.mp3`), {
+    const caption = `<b>🎵 [ SPOTIFY MUSIC ]</b>\n\n` +
+                    `<b>${title}</b>\n` +
+                    `<i>${artist}</i>\n\n` +
+                    `<a href="${sourceUrl}">Buka di Spotify</a>`;
+
+    const audioOpts = {
       title,
       performer: artist,
       caption,
-    });
+      parse_mode: 'HTML',
+    };
+    if (coverBuffer) {
+      audioOpts.thumbnail = new InputFile(coverBuffer, 'cover.jpg');
+    }
+
+    return ctx.replyWithAudio(
+      new InputFile(track.buffer, `${title.replace(/[^a-z0-9 _-]/gi, '').trim() || 'audio'}.mp3`),
+      audioOpts
+    );
   }
 
-  return sock.sendMessage(jid, {
+  // 2. Respon WhatsApp (Rich Message Spotify Player Card via externalAdReply)
+  const messagePayload = {
     audio: track.buffer,
-    mimetype: 'audio/mpeg',
+    mimetype: 'audio/mp4',
     fileName: `${title.replace(/[\\/:*?"<>|]/g, '').trim() || 'audio'}.mp3`,
-    caption,
-  });
+    ptt: false,
+    contextInfo: {
+      externalAdReply: {
+        title: title,
+        body: `${artist} • Spotify`,
+        mediaType: 1,
+        sourceUrl: sourceUrl,
+        renderLargerThumbnail: true, // ⭐ Tampilan banner album art besar di WhatsApp
+        showAdAttribution: true,
+      },
+    },
+  };
+
+  if (coverBuffer) {
+    messagePayload.contextInfo.externalAdReply.thumbnail = coverBuffer;
+  }
+
+  return sock.sendMessage(jid, messagePayload);
 }

@@ -15,6 +15,7 @@ import { registerAiCommands } from '../src/modules/ai/index.js';
 import { registerProgrammingCommands } from '../src/modules/programming/index.js';
 import { registerMediaCommands } from '../src/modules/media/index.js';
 import { registerDownloaderCommands } from '../src/modules/downloader/index.js';
+import { sendMusicAudio } from '../src/modules/downloader/music-search.js';
 import {
   registerGroupCommands,
   setAfk,
@@ -716,6 +717,37 @@ async function runAllTests() {
     assert.ok(vtCmd.aliases.includes('vt'));
     assert.ok(vtCmd.aliases.includes('cekfakta'));
     assert.ok(vtCmd.aliases.includes('cekhoax'));
+  });
+
+  await test('sendMusicAudio builds Spotify Rich Message payload with externalAdReply on WhatsApp', async () => {
+    let capturedPayload = null;
+    let capturedJid = null;
+    const mockSock = {
+      sendMessage: async (destJid, payload) => {
+        capturedJid = destJid;
+        capturedPayload = payload;
+        return { key: { id: 'msg_spotify_1' } };
+      },
+    };
+
+    const mockTrack = {
+      title: 'Bohemian Rhapsody',
+      artist: 'Queen',
+      buffer: Buffer.from('fake_mp3_audio_buffer'),
+      thumbnail: null,
+      sourceUrl: 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv',
+    };
+
+    await sendMusicAudio({ platform: 'whatsapp', sock: mockSock, jid: '628123456789@s.whatsapp.net', track: mockTrack });
+    assert.equal(capturedJid, '628123456789@s.whatsapp.net');
+    assert.ok(capturedPayload.audio);
+    assert.equal(capturedPayload.mimetype, 'audio/mp4');
+    assert.equal(capturedPayload.ptt, false);
+    assert.ok(capturedPayload.contextInfo?.externalAdReply);
+    assert.equal(capturedPayload.contextInfo.externalAdReply.title, 'Bohemian Rhapsody');
+    assert.equal(capturedPayload.contextInfo.externalAdReply.body, 'Queen • Spotify');
+    assert.equal(capturedPayload.contextInfo.externalAdReply.renderLargerThumbnail, true);
+    assert.equal(capturedPayload.contextInfo.externalAdReply.sourceUrl, 'https://open.spotify.com/track/4u7EnebtmKWzUH433cf5Qv');
   });
 
   // Summary
