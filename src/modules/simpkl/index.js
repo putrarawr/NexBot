@@ -206,6 +206,157 @@ export async function runSimpklRunner(action, params = {}) {
 }
 
 /**
+ * Native Node.js GitHub commit fetcher & summarizer
+ * Completely independent of Python packages for instant zero-dependency execution
+ */
+export function summarizeCommitsNode(commits) {
+  if (!commits || commits.length === 0) return '';
+  const byRepo = {};
+  for (const c of commits) {
+    if (!byRepo[c.repo]) byRepo[c.repo] = [];
+    byRepo[c.repo].push(c.message);
+  }
+
+  const parts = [];
+  for (const [repo, messages] of Object.entries(byRepo)) {
+    const repoShort = repo.split('/').pop();
+    if (messages.length === 1) {
+      parts.push(`Melakukan pengembangan pada proyek ${repoShort}: ${messages[0]}.`);
+    } else {
+      parts.push(`Melakukan pengembangan pada proyek ${repoShort} dengan rincian pekerjaan sebagai berikut: ${messages.join('; ')}.`);
+    }
+  }
+  return parts.join('\n\n');
+}
+
+export async function fetchGithubCommitsBetweenNode(sinceIso, untilIso) {
+  const token = process.env.GITHUB_TOKEN || '';
+  const repos = (process.env.GITHUB_REPOS || 'putrarawr/cafe-pos').split(',').map((r) => r.trim()).filter(Boolean);
+  const authors = (process.env.GITHUB_AUTHORS || 'WisWho,putrarawr').split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+
+  const headers = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'NexBot-SIMPKL-Fetcher',
+  };
+  if (token) headers['Authorization'] = `token ${token}`;
+
+  const commitsByDate = {};
+
+  for (const repo of repos) {
+    let page = 1;
+    while (page <= 3) {
+      const url = `https://api.github.com/repos/${repo}/commits?since=${sinceIso}&until=${untilIso}&per_page=100&page=${page}`;
+      try {
+        const resp = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+        if (!resp.ok) break;
+        const data = await resp.json();
+        if (!Array.isArray(data) || data.length === 0) break;
+
+        for (const item of data) {
+          const authorLogin = (item.author?.login || '').toLowerCase();
+          const authorName = (item.commit?.author?.name || '').toLowerCase();
+
+          const matches = authors.some((a) => a === authorLogin || a === authorName);
+          if (!matches) continue;
+
+          const commitDateObj = new Date(item.commit.author.date);
+          const dateStr = commitDateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+          if (!commitsByDate[dateStr]) commitsByDate[dateStr] = [];
+
+          commitsByDate[dateStr].push({
+            repo,
+            sha: item.sha.slice(0, 7),
+            message: (item.commit.message || '').split('\n')[0],
+            author: item.author?.login || item.commit.author.name,
+          });
+        }
+        page++;
+      } catch {
+        break;
+      }
+    }
+  }
+
+  return commitsByDate;
+}
+
+export async function fetchBatchWorkdaysNode(startDateStr, count = 5) {
+  const startDt = new Date(startDateStr);
+  const workdays = [];
+  const curr = new Date(startDt);
+  while (workdays.length < count) {
+    const dayOfWeek = curr.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      workdays.push(new Date(curr));
+    }
+    curr.setDate(curr.getDate() + 1);
+  }
+
+  const endDt = workdays[workdays.length - 1];
+  const sinceIso = `${workdays[0].toISOString().split('T')[0]}T00:00:00Z`;
+  const nextEnd = new Date(endDt);
+  nextEnd.setDate(nextEnd.getDate() + 1);
+  const untilIso = `${nextEnd.toISOString().split('T')[0]}T23:59:59Z`;
+
+  const commitsByDate = await fetchGithubCommitsBetweenNode(sinceIso, untilIso);
+  const historyDates = getSubmittedDatesSet();
+  const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  const items = workdays.map((dt) => {
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    const commits = commitsByDate[dateStr] || [];
+    const summary = summarizeCommitsNode(commits);
+    const alreadySubmitted = historyDates.has(dateStr);
+
+    return {
+      date: dateStr,
+      day: DAY_NAMES[dt.getDay()],
+      has_commits: commits.length > 0,
+      commit_count: commits.length,
+      summary,
+      already_submitted: alreadySubmitted,
+      previous_catatan: '',
+    };
+  });
+
+  return {
+    status: 'success',
+    start_date: items[0].date,
+    end_date: items[items.length - 1].date,
+    total_days: items.length,
+    items,
+  };
+}
+
+export async function fetchSingleDateNode(dateStr) {
+  const dt = new Date(dateStr);
+  const sinceIso = `${dateStr}T00:00:00Z`;
+  const untilIso = `${dateStr}T23:59:59Z`;
+
+  const commitsByDate = await fetchGithubCommitsBetweenNode(sinceIso, untilIso);
+  const commits = commitsByDate[dateStr] || [];
+  const summary = summarizeCommitsNode(commits);
+  const historyDates = getSubmittedDatesSet();
+  const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+
+  return {
+    status: 'success',
+    date: dateStr,
+    day: DAY_NAMES[dt.getDay()],
+    is_weekend: dt.getDay() === 0 || dt.getDay() === 6,
+    has_commits: commits.length > 0,
+    commit_count: commits.length,
+    summary,
+    commits,
+    already_submitted: historyDates.has(dateStr),
+    previous_catatan: '',
+  };
+}
+
+/**
  * Read submitted dates from history.json
  */
 export function getSubmittedDatesSet() {
@@ -407,7 +558,12 @@ export async function handleDateSelection(ctx, dateStr) {
   );
 
   try {
-    const res = await runSimpklRunner('fetch', { date: dateStr });
+    let res;
+    try {
+      res = await fetchSingleDateNode(dateStr);
+    } catch {
+      res = await runSimpklRunner('fetch', { date: dateStr });
+    }
     if (res.status !== 'success') {
       throw new Error(res.message || 'Gagal memproses data');
     }
@@ -532,7 +688,12 @@ export async function handleBatchSelection(ctx, startDate, modeLabel = '') {
   );
 
   try {
-    const res = await runSimpklRunner('batch-fetch', { date: startDate, count: 5 });
+    let res;
+    try {
+      res = await fetchBatchWorkdaysNode(startDate, 5);
+    } catch {
+      res = await runSimpklRunner('batch-fetch', { date: startDate, count: 5 });
+    }
     if (res.status !== 'success') {
       throw new Error(res.message || 'Gagal memproses batch');
     }

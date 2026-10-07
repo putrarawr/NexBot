@@ -10,7 +10,29 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+
+# Safe zero-dependency .env loader (does not require python-dotenv package)
+def _load_env_file(filepath):
+    if not os.path.exists(filepath):
+        return
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip("'\"")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        pass
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = _load_env_file
 
 # Ensure we are in project directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,7 +50,6 @@ for env_file in CANDIDATE_ENVS:
         load_dotenv(env_file)
 
 from github_fetcher import fetch_commits, summarize_commits, WIB
-from simpkl_bot import SIMPKLBot
 
 # Robust history.json resolution
 CANDIDATE_HISTORIES = [
@@ -145,6 +166,11 @@ def action_submit(date_str, catatan):
 
     bot = None
     try:
+        try:
+            from simpkl_bot import SIMPKLBot
+        except ImportError as e:
+            return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
+
         # Headless mode for server / background execution
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
@@ -241,6 +267,11 @@ def action_batch_submit(entries):
     bot = None
     results = []
     try:
+        try:
+            from simpkl_bot import SIMPKLBot
+        except ImportError as e:
+            return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
+
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:

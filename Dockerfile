@@ -1,9 +1,10 @@
 FROM node:20-alpine
 
-# Alpine's repository yt-dlp often trails YouTube changes. Install the current
-# upstream release, plus a known font family for Sharp/librsvg quote rendering.
-RUN apk add --no-cache git ffmpeg python3 py3-pip fontconfig ttf-dejavu font-noto font-noto-cjk \
-  && python3 -m pip install --no-cache-dir --break-system-packages --upgrade yt-dlp
+# Install system dependencies including chromium, python3, pip, ffmpeg, and fonts
+RUN apk add --no-cache git ffmpeg python3 py3-pip chromium chromium-chromedriver fontconfig ttf-dejavu font-noto font-noto-cjk \
+  && python3 -m pip install --no-cache-dir --break-system-packages --upgrade yt-dlp python-dotenv requests selenium undetected-chromedriver
+
+ENV CHROME_BINARY=/usr/bin/chromium-browser
 
 # Set working directory
 WORKDIR /app

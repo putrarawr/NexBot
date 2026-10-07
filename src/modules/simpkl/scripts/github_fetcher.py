@@ -2,10 +2,50 @@
 GitHub commit fetcher — pulls commits from configured repos and groups them by date.
 """
 
-import requests
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+try:
+    import requests
+except ImportError:
+    import urllib.request
+    import urllib.error
+    import urllib.parse
+
+    class RequestsShimResponse:
+        def __init__(self, data_bytes, status_code, headers):
+            self._data = data_bytes
+            self.status_code = status_code
+            self.headers = headers or {}
+
+        def json(self):
+            try:
+                return json.loads(self._data.decode("utf-8"))
+            except Exception:
+                return {}
+
+    class RequestsShim:
+        @staticmethod
+        def get(url, headers=None, params=None, timeout=30):
+            if params:
+                query_str = urllib.parse.urlencode(params)
+                url = f"{url}?{query_str}"
+            req_headers = {
+                "User-Agent": "NexBot-SIMPKL-Fetcher",
+            }
+            if headers:
+                req_headers.update(headers)
+            req = urllib.request.Request(url, headers=req_headers)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return RequestsShimResponse(resp.read(), resp.status, dict(resp.headers))
+            except urllib.error.HTTPError as e:
+                return RequestsShimResponse(e.read(), e.code, dict(e.headers))
+            except Exception:
+                return RequestsShimResponse(b"{}", 500, {})
+
+    requests = RequestsShim
 
 WIB = timezone(timedelta(hours=7))
 
