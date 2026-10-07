@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
 import { initConfig, getConfig, updateConfig } from '../src/config.js';
 import { initDatabase, addScore, getLeaderboard, getStats, getUser, activeGames } from '../src/utils/database.js';
@@ -41,7 +42,18 @@ import { isCommandSupported } from '../src/bot/handler.js';
 import { registerUtilityTools } from '../src/modules/tools/index.js';
 import { registerVeriftokCommands, extractTikTokUrl, formatScoreBar } from '../src/modules/veriftok/index.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, playRpsRound } from '../src/modules/game/visual-games.js';
-import { registerSimpklCommands, buildDatePicker, buildSimpklMainMenu, getMondayOfDate } from '../src/modules/simpkl/index.js';
+import {
+  registerSimpklCommands,
+  buildDatePicker,
+  buildSimpklMainMenu,
+  getMondayOfDate,
+  resolveSimpklConfig,
+  applyLoopToBatch,
+  applyVaryToBatch,
+  renderBatchDraftMessage,
+  LOOP_PRESETS,
+  VARY_PACKAGES,
+} from '../src/modules/simpkl/index.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -867,6 +879,69 @@ async function runAllTests() {
     const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
     assert.equal(emojiRegex.test(menu.text), false, 'Main menu text must not contain emojis');
     assert.equal(emojiRegex.test(json), false, 'Main menu keyboard buttons must not contain emojis');
+  });
+
+  await test('resolveSimpklConfig locates runner script and environment accurately', () => {
+    const config = resolveSimpklConfig();
+    assert.ok(config.dir, 'Config dir must be defined');
+    assert.ok(config.runnerScript, 'Runner script must be defined');
+    assert.ok(fs.existsSync(config.runnerScript), 'simpkl_runner.py must exist at resolved location');
+  });
+
+  await test('applyLoopToBatch preserves Monday and loops single note to remaining 4 workdays', () => {
+    const mockBatch = {
+      startDate: '2026-10-05',
+      items: [
+        { date: '2026-10-05', day: 'Senin', has_commits: true, commit_count: 3, summary: 'Commit dari github' },
+        { date: '2026-10-06', day: 'Selasa', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-07', day: 'Rabu', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-08', day: 'Kamis', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-09', day: 'Jumat', has_commits: false, commit_count: 0, summary: 'Default' },
+      ],
+    };
+
+    const looped = applyLoopToBatch(mockBatch, 'Teks pengujian berulang kasir', 'Loop Kustom');
+    assert.equal(looped.items[0].summary, 'Commit dari github', 'Monday commit note must be preserved');
+    assert.equal(looped.items[1].summary, 'Teks pengujian berulang kasir');
+    assert.equal(looped.items[2].summary, 'Teks pengujian berulang kasir');
+    assert.equal(looped.items[3].summary, 'Teks pengujian berulang kasir');
+    assert.equal(looped.items[4].summary, 'Teks pengujian berulang kasir');
+
+    // Test renderBatchDraftMessage
+    const view = renderBatchDraftMessage('2026-10-05', looped.items, looped.mode);
+    assert.ok(view.text.includes('DRAF BATCH 5 HARI KERJA'));
+    assert.ok(view.text.includes('Commit dari github'));
+    assert.ok(view.text.includes('Teks pengujian berulang kasir'));
+
+    const json = JSON.stringify(view.keyboard);
+    assert.ok(json.includes('simpkl_batch_submit:2026-10-05'));
+    assert.ok(json.includes('simpkl_bloop_menu:2026-10-05'));
+    assert.ok(json.includes('simpkl_bvary_menu:2026-10-05'));
+    assert.ok(json.includes('simpkl_bedit_menu:2026-10-05'));
+
+    // Strict zero emoji check
+    const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+    assert.equal(emojiRegex.test(view.text), false, 'Batch draft view text must not contain emojis');
+    assert.equal(emojiRegex.test(json), false, 'Batch draft view keyboard must not contain emojis');
+  });
+
+  await test('applyVaryToBatch preserves Monday and applies varied notes across remaining 4 workdays', () => {
+    const mockBatch = {
+      startDate: '2026-10-05',
+      items: [
+        { date: '2026-10-05', day: 'Senin', has_commits: true, commit_count: 3, summary: 'Commit dari github' },
+        { date: '2026-10-06', day: 'Selasa', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-07', day: 'Rabu', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-08', day: 'Kamis', has_commits: false, commit_count: 0, summary: 'Default' },
+        { date: '2026-10-09', day: 'Jumat', has_commits: false, commit_count: 0, summary: 'Default' },
+      ],
+    };
+
+    const varied = applyVaryToBatch(mockBatch, 'A');
+    assert.equal(varied.items[0].summary, 'Commit dari github', 'Monday must remain preserved');
+    assert.notEqual(varied.items[1].summary, varied.items[2].summary, 'Tuesday and Wednesday notes should be different');
+    assert.notEqual(varied.items[2].summary, varied.items[3].summary, 'Wednesday and Thursday notes should be different');
+    assert.notEqual(varied.items[3].summary, varied.items[4].summary, 'Thursday and Friday notes should be different');
   });
 
   // Summary
