@@ -28,6 +28,7 @@ class SIMPKLBot:
     def __init__(self, chrome_binary: Optional[str] = None, headless: bool = False):
         self.display = None
         self.driver = None
+        self.last_error = ""
 
         # Check display availability
         # Cloudflare Turnstile is actively blocked by --headless=new.
@@ -282,7 +283,10 @@ class SIMPKLBot:
 
         err = self._detect_login_error()
         if err:
+            self.last_error = f"Respon portal: {err}"
             print(f"  [!] Respon portal SIMPKL: {err}")
+        elif not self.last_error:
+            self.last_error = "Autentikasi gagal atau sesi tidak dapat diverifikasi oleh portal SIMPKL"
 
         return False
 
@@ -323,7 +327,8 @@ class SIMPKLBot:
         )
         if is_automated:
             err = self._detect_login_error()
-            msg = err or "Verifikasi keamanan atau kredensial SIMPKL belum sesuai"
+            msg = err or self.last_error or "Verifikasi keamanan atau kredensial SIMPKL belum sesuai"
+            self.last_error = msg
             print(f"  [!] Mode otomatis: melewati login manual terminal ({msg}).")
             return False
 
@@ -530,6 +535,7 @@ class SIMPKLBot:
             time.sleep(1)
 
         print("  [!] Turnstile timeout, mencoba submit form...")
+        self.last_error = "Verifikasi Cloudflare Turnstile melebihi batas waktu (timeout)"
         return False
 
     def _find_input_by_type_or_placeholder(self, keyword: str, input_type: str):

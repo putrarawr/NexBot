@@ -223,7 +223,8 @@ def action_submit(date_str, catatan):
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
-            return {"status": "error", "message": "Gagal login ke SIMPKL. Periksa NISN atau password"}
+            err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
+            return {"status": "error", "message": err_msg}
 
         existing_dates = bot.get_existing_dates()
         for d in existing_dates:
@@ -323,7 +324,8 @@ def action_batch_submit(entries):
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
-            return {"status": "error", "message": "Gagal login ke SIMPKL. Periksa NISN atau password"}
+            err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
+            return {"status": "error", "message": err_msg}
 
         existing_dates = bot.get_existing_dates()
         for d in existing_dates:
@@ -384,7 +386,8 @@ def action_sync():
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
-            return {"status": "error", "message": "Gagal login ke SIMPKL. Periksa NISN atau password"}
+            err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
+            return {"status": "error", "message": err_msg}
 
         existing_dates = bot.get_existing_dates()
         synced_count = 0
