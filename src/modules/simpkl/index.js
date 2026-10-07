@@ -106,9 +106,9 @@ export function resolveSimpklConfig() {
   const fileDir = path.dirname(fileURLToPath(import.meta.url));
 
   const candidateDirs = [
-    process.env.SIMPKL_DIR,
     path.resolve(fileDir, 'scripts'),
     path.resolve(process.cwd(), 'src/modules/simpkl/scripts'),
+    process.env.SIMPKL_DIR,
     '/home/putra/Project-Coding/tools-scraping-jurnal',
     path.join(os.homedir(), 'Project-Coding/tools-scraping-jurnal'),
     path.resolve(process.cwd(), '../tools-scraping-jurnal'),
@@ -135,6 +135,7 @@ export function resolveSimpklConfig() {
   // Candidate python venvs
   const pythonCandidates = [
     path.join(selectedDir, '.venv/bin/python3'),
+    path.resolve(fileDir, 'scripts/.venv/bin/python3'),
     '/home/putra/Project-Coding/tools-scraping-jurnal/.venv/bin/python3',
     path.join(os.homedir(), 'Project-Coding/tools-scraping-jurnal/.venv/bin/python3'),
     'python3',
@@ -270,16 +271,20 @@ export async function runSimpklRunner(action, params = {}) {
     execFile(
       config.pythonBin,
       args,
-      { cwd: config.dir, env: runnerEnv, timeout: 180000 },
+      { cwd: config.dir, env: runnerEnv, timeout: 120000 },
       (error, stdout, stderr) => {
         if (error) {
+          if (error.killed || error.signal === 'SIGTERM') {
+            return reject(new Error('Proses SIMPKL melebihi batas waktu (timeout). Silakan periksa koneksi atau coba sinkronisasi ulang.'));
+          }
           const errMsg = stderr?.trim() || error.message;
           return reject(new Error(errMsg));
         }
 
         try {
           const raw = stdout.trim();
-          const json = JSON.parse(raw);
+          const jsonLine = raw.split('\n').filter((l) => l.trim().startsWith('{') || l.trim().startsWith('[')).pop() || raw;
+          const json = JSON.parse(jsonLine);
           resolve(json);
         } catch (err) {
           reject(new Error(`Gagal membaca output runner: ${stdout || err.message}`));

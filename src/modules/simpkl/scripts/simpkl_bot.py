@@ -1,16 +1,21 @@
 """
 SIMPKL browser automation — handles login + journal form submission
 using undetected-chromedriver to bypass Cloudflare Turnstile.
+No emojis in console logs or code comments.
 """
 
+import json
 import os
+import re
+import sys
 import time
+from typing import Optional
+
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from typing import Optional
 
 
 BASE_URL = "https://pkl.smk1bws.sch.id"
@@ -21,13 +26,36 @@ JURNAL_ADD_URL = f"{BASE_URL}/siswa/jurnal/add"
 
 class SIMPKLBot:
     def __init__(self, chrome_binary: Optional[str] = None, headless: bool = False):
+        self.display = None
+        self.driver = None
+
+        # Check display availability
+        # Cloudflare Turnstile is actively blocked by --headless=new.
+        # When a real DISPLAY is present, or Xvfb virtual display is started,
+        # Chrome runs in standard display mode so Turnstile solves reliably in 3-4 seconds.
+        has_real_display = bool(os.environ.get("DISPLAY"))
+        use_virtual_display = False
+
+        if not has_real_display:
+            try:
+                from pyvirtualdisplay import Display
+                self.display = Display(visible=False, size=(1280, 900))
+                self.display.start()
+                use_virtual_display = True
+                print("  Virtual display (Xvfb) berhasil diaktifkan.")
+            except Exception:
+                self.display = None
+
+        should_use_chrome_headless = headless and not has_real_display and not use_virtual_display
+        self.is_headless = should_use_chrome_headless
+        self.requested_headless = headless
+
         options = uc.ChromeOptions()
-        if headless:
+        if should_use_chrome_headless:
             options.add_argument("--headless=new")
+
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-software-rasterizer")
         options.add_argument("--window-size=1280,900")
 
         if chrome_binary and os.path.exists(chrome_binary):
@@ -45,19 +73,18 @@ class SIMPKLBot:
             from selenium.webdriver.chrome.options import Options as SeleniumOptions
 
             std_options = SeleniumOptions()
-            if headless:
+            if should_use_chrome_headless:
                 std_options.add_argument("--headless=new")
             std_options.add_argument("--no-sandbox")
             std_options.add_argument("--disable-dev-shm-usage")
-            std_options.add_argument("--disable-gpu")
-            std_options.add_argument("--disable-software-rasterizer")
+            std_options.add_argument("--window-size=1280,900")
             if chrome_binary and os.path.exists(chrome_binary):
                 std_options.binary_location = chrome_binary
 
             driver_candidates = [
                 "/usr/bin/chromedriver",
                 "/usr/lib/chromium/chromedriver",
-                "/usr/local/bin/chromedriver"
+                "/usr/local/bin/chromedriver",
             ]
             driver_bin = next((d for d in driver_candidates if os.path.exists(d)), None)
             if driver_bin:
@@ -72,7 +99,6 @@ class SIMPKLBot:
     def _detect_chrome_version(binary: Optional[str] = None) -> Optional[int]:
         """Detect installed Chrome major version number."""
         import subprocess
-        import re
         candidates = []
         if binary:
             candidates.append(binary)
@@ -94,21 +120,79 @@ class SIMPKLBot:
                 continue
         return None
 
+    @staticmethod
+    def _get_cookie_file_path() -> str:
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.abspath(os.path.join(base, "../../../../data/simpkl_cookies.json")),
+            os.path.abspath(os.path.join(base, "../../../data/simpkl_cookies.json")),
+            os.path.abspath(os.path.join(base, "../../data/simpkl_cookies.json")),
+            os.path.join(base, "simpkl_cookies.json"),
+        ]
+        for c in candidates:
+            if os.path.exists(os.path.dirname(c)):
+                return c
+        return os.path.join(base, "simpkl_cookies.json")
+
+    def _save_cookies(self):
+        try:
+            cookies = self.driver.get_cookies()
+            fpath = self._get_cookie_file_path()
+            os.makedirs(os.path.dirname(fpath), exist_ok=True)
+            with open(fpath, "w", encoding="utf-8") as f:
+                json.dump(cookies, f, indent=2)
+            print("  Session cookies berhasil disimpan.")
+        except Exception as e:
+            print(f"  [!] Gagal menyimpan session cookies: {e}")
+
+    def _load_cookies(self) -> bool:
+        fpath = self._get_cookie_file_path()
+        if not os.path.exists(fpath):
+            return False
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                cookies = json.load(f)
+            if not isinstance(cookies, list) or not cookies:
+                return False
+            self.driver.get(LOGIN_URL)
+            time.sleep(1)
+            for c in cookies:
+                try:
+                    self.driver.add_cookie(c)
+                except Exception:
+                    pass
+            self.driver.get(JURNAL_URL)
+            time.sleep(2)
+            if self._is_logged_in():
+                print("  Berhasil menggunakan session cookies yang tersimpan.")
+                return True
+        except Exception as e:
+            print(f"  [!] Gagal memuat session cookies: {e}")
+        return False
+
     def login(self, nisn: str, password: str) -> bool:
         """
-        Login to SIMPKL. Tries auto-login first, falls back to manual login
-        if Cloudflare or form detection fails.
+        Login to SIMPKL. First attempts session cookies reuse,
+        then tries auto-login with Turnstile bypass.
         """
+        if self._load_cookies():
+            return True
+
         print("  Membuka halaman login...")
         self.driver.get(LOGIN_URL)
-        time.sleep(3)
+        time.sleep(2)
 
         if self._is_logged_in():
             print("  Sudah login sebelumnya!")
+            self._save_cookies()
             return True
 
         try:
-            return self._auto_login(nisn, password)
+            success = self._auto_login(nisn, password)
+            if success:
+                self._save_cookies()
+                return True
+            return self._manual_login()
         except Exception as e:
             print(f"\n  [!] Auto-login gagal: {e}")
             return self._manual_login()
@@ -116,7 +200,7 @@ class SIMPKLBot:
     def _auto_login(self, nisn: str, password: str) -> bool:
         """Attempt automatic login by filling form fields."""
         print("  Menunggu Cloudflare selesai & form muncul...")
-        self._wait_for_cloudflare_page(timeout=30)
+        self._wait_for_cloudflare_page(timeout=25)
 
         nisn_field = self._find_field(
             [
@@ -141,7 +225,7 @@ class SIMPKLBot:
         pass_field.send_keys(password)
 
         print("  Menunggu Turnstile token...")
-        self._wait_for_turnstile(timeout=60)
+        self._wait_for_turnstile(timeout=30)
 
         try:
             submit = self.driver.find_element(
@@ -153,17 +237,59 @@ class SIMPKLBot:
             )
 
         submit.click()
-        time.sleep(5)
+        time.sleep(4)
 
         if self._is_logged_in():
             print(f"  Login berhasil! → {self.driver.current_url}")
             return True
 
-        print("  [!] Auto-login sepertinya gagal")
-        return self._manual_login()
+        err = self._detect_login_error()
+        if err:
+            print(f"  [!] Respon portal SIMPKL: {err}")
+
+        return False
+
+    def _detect_login_error(self) -> Optional[str]:
+        """Check for portal error messages on the login page."""
+        try:
+            error_selectors = [
+                ".alert.alert-danger",
+                ".alert-danger",
+                ".alert",
+                ".text-danger",
+                ".error-message",
+                ".swal2-content",
+            ]
+            for sel in error_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in elements:
+                    txt = el.text.strip()
+                    if txt:
+                        return txt
+        except Exception:
+            pass
+        return None
 
     def _manual_login(self) -> bool:
-        """Let the user login manually in the open browser window."""
+        """Handle login when auto-login does not succeed."""
+        if self._is_logged_in():
+            self._save_cookies()
+            return True
+
+        # In automated or non-interactive environment (Telegram bot runner, docker, background tasks)
+        # NEVER block on input() to avoid freezing execution
+        is_automated = (
+            self.requested_headless
+            or self.is_headless
+            or os.environ.get("NON_INTERACTIVE") == "1"
+            or not sys.stdin.isatty()
+        )
+        if is_automated:
+            err = self._detect_login_error()
+            msg = err or "Verifikasi keamanan atau kredensial SIMPKL belum sesuai"
+            print(f"  [!] Mode otomatis: melewati login manual terminal ({msg}).")
+            return False
+
         print(f"\n  ╔══════════════════════════════════════════════╗")
         print(f"  ║  LOGIN MANUAL                                ║")
         print(f"  ║  Login di browser yang terbuka, lalu         ║")
@@ -174,17 +300,22 @@ class SIMPKLBot:
         if "/login" not in current and "/siswa" not in current:
             self.driver.get(LOGIN_URL)
 
-        input("\n  Tekan ENTER setelah berhasil login di browser... ")
+        try:
+            input("\n  Tekan ENTER setelah berhasil login di browser... ")
+        except (EOFError, OSError):
+            return False
 
         for _ in range(10):
             if self._is_logged_in():
                 print(f"  Login berhasil! → {self.driver.current_url}")
+                self._save_cookies()
                 return True
             time.sleep(1)
 
         current = self.driver.current_url
         if "/login" not in current:
             print(f"  Login dianggap berhasil → {current}")
+            self._save_cookies()
             return True
 
         print("  [!] Masih belum login. Coba jalankan ulang.")
@@ -192,10 +323,13 @@ class SIMPKLBot:
 
     def _is_logged_in(self) -> bool:
         """Check if currently logged into SIMPKL."""
-        current = self.driver.current_url
-        return "/siswa/" in current and "/login" not in current
+        try:
+            current = self.driver.current_url
+            return "/siswa" in current and "/login" not in current
+        except Exception:
+            return False
 
-    def _wait_for_cloudflare_page(self, timeout: int = 30):
+    def _wait_for_cloudflare_page(self, timeout: int = 25):
         """Wait for Cloudflare interstitial challenge page to pass."""
         start = time.time()
         while time.time() - start < timeout:
@@ -218,7 +352,7 @@ class SIMPKLBot:
                 time.sleep(1)
                 return
 
-            time.sleep(2)
+            time.sleep(1)
 
         print("  [!] Cloudflare challenge timeout")
 
@@ -244,7 +378,7 @@ class SIMPKLBot:
         Returns True on success.
         """
         self.driver.get(JURNAL_ADD_URL)
-        time.sleep(3)
+        time.sleep(2)
 
         date_input = self._find_date_input()
         if date_input:
@@ -298,7 +432,7 @@ class SIMPKLBot:
         Returns set of date strings in YYYY-MM-DD format.
         """
         self.driver.get(JURNAL_URL)
-        time.sleep(3)
+        time.sleep(2)
 
         existing = set()
 
@@ -327,41 +461,39 @@ class SIMPKLBot:
 
     def close(self):
         try:
-            self.driver.quit()
+            if self.driver:
+                self.driver.quit()
         except Exception:
             pass
+        finally:
+            if self.display:
+                try:
+                    self.display.stop()
+                except Exception:
+                    pass
 
-    def _wait_for_turnstile(self, timeout: int = 60):
+    def _wait_for_turnstile(self, timeout: int = 30):
         """Wait for Cloudflare Turnstile challenge to auto-resolve."""
         start = time.time()
         while time.time() - start < timeout:
             try:
-                response_input = self.driver.find_element(
+                response_inputs = self.driver.find_elements(
                     By.CSS_SELECTOR,
                     "input[name='cf-turnstile-response'], "
                     "input[name='cf_turnstile_response']",
                 )
-                val = response_input.get_attribute("value")
-                if val and len(val) > 10:
-                    print("  Turnstile resolved!")
-                    return
+                if response_inputs:
+                    val = response_inputs[0].get_attribute("value")
+                    if val and len(val) > 10:
+                        print("  Turnstile resolved!")
+                        return True
             except Exception:
                 pass
 
-            try:
-                iframes = self.driver.find_elements(
-                    By.CSS_SELECTOR, "iframe[src*='turnstile']"
-                )
-                if iframes:
-                    time.sleep(2)
-                else:
-                    return
-            except Exception:
-                pass
+            time.sleep(1)
 
-            time.sleep(2)
-
-        print("  [!] Turnstile timeout, mencoba submit tanpa menunggu...")
+        print("  [!] Turnstile timeout, mencoba submit form...")
+        return False
 
     def _find_input_by_type_or_placeholder(self, keyword: str, input_type: str):
         inputs = self.driver.find_elements(By.TAG_NAME, "input")
@@ -415,8 +547,6 @@ class SIMPKLBot:
 
     def _extract_date_from_text(self, text: str) -> Optional[str]:
         """Parse Indonesian date like '07 September 2026' to YYYY-MM-DD."""
-        import re
-
         months = {
             "januari": "01",
             "februari": "02",

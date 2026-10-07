@@ -54,6 +54,7 @@ from github_fetcher import fetch_commits, summarize_commits, WIB
 # Robust history.json resolution
 CANDIDATE_HISTORIES = [
     os.getenv("SIMPKL_HISTORY_FILE", "").strip(),
+    os.path.abspath(os.path.join(BASE_DIR, "../../../../data/simpkl_history.json")),
     os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_history.json")),
     os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_history.json")),
     os.path.join(BASE_DIR, "history.json"),
@@ -103,8 +104,10 @@ def get_config():
     if not username or not password:
         candidate_configs = [
             os.path.join(BASE_DIR, "simpkl_auth.json"),
+            os.path.abspath(os.path.join(BASE_DIR, "../../../../data/simpkl_auth.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_auth.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_auth.json")),
+            os.path.abspath(os.path.join(BASE_DIR, "../../../../data/config.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../../data/config.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../data/config.json")),
         ]
@@ -373,6 +376,11 @@ def action_sync():
 
     bot = None
     try:
+        try:
+            from simpkl_bot import SIMPKLBot
+        except ImportError as e:
+            return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
+
         bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
