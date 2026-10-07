@@ -143,11 +143,14 @@ export function resolveSimpklConfig() {
 
   // Candidate history files
   const historyCandidates = [
-    '/home/putra/Project-Coding/tools-scraping-jurnal/history.json',
+    process.env.SIMPKL_HISTORY_FILE,
+    path.resolve(process.cwd(), 'data/simpkl_history.json'),
     path.join(selectedDir, 'history.json'),
+    path.resolve(fileDir, 'scripts/history.json'),
+    '/home/putra/Project-Coding/tools-scraping-jurnal/history.json',
     path.join(os.homedir(), 'Project-Coding/tools-scraping-jurnal/history.json'),
-  ];
-  const historyFile = historyCandidates.find((f) => fs.existsSync(f)) || path.join(selectedDir, 'history.json');
+  ].filter(Boolean);
+  const historyFile = historyCandidates.find((f) => fs.existsSync(f)) || path.resolve(process.cwd(), 'data/simpkl_history.json');
 
   return {
     dir: selectedDir,
@@ -162,7 +165,15 @@ export function resolveSimpklConfig() {
  * Get Monday date string YYYY-MM-DD for a given date
  */
 export function getMondayOfDate(dateInput = null) {
-  const d = dateInput ? new Date(dateInput) : new Date();
+  let d;
+  if (!dateInput) {
+    d = new Date();
+  } else if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    const [y, m, day] = dateInput.split('-').map(Number);
+    d = new Date(y, m - 1, day);
+  } else {
+    d = new Date(dateInput);
+  }
   const day = d.getDay();
   const diff = d.getDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(d.setDate(diff));
@@ -232,7 +243,9 @@ export function summarizeCommitsNode(commits) {
 export async function fetchGithubCommitsBetweenNode(sinceIso, untilIso) {
   const token = process.env.GITHUB_TOKEN || '';
   const repos = (process.env.GITHUB_REPOS || 'putrarawr/cafe-pos').split(',').map((r) => r.trim()).filter(Boolean);
-  const authors = (process.env.GITHUB_AUTHORS || 'WisWho,putrarawr').split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  const authorEnv = process.env.GITHUB_AUTHORS || 'putrarawr,WisWho,Paissaiueo,broiosme,Fais Adhyasta Pratama';
+  const filterAuthors = authorEnv.trim() !== '*' && authorEnv.trim().toLowerCase() !== 'all';
+  const authors = authorEnv.split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
 
   const headers = {
     'Accept': 'application/vnd.github.v3+json',
@@ -256,8 +269,10 @@ export async function fetchGithubCommitsBetweenNode(sinceIso, untilIso) {
           const authorLogin = (item.author?.login || '').toLowerCase();
           const authorName = (item.commit?.author?.name || '').toLowerCase();
 
-          const matches = authors.some((a) => a === authorLogin || a === authorName);
-          if (!matches) continue;
+          if (filterAuthors) {
+            const matches = authors.some((a) => a === authorLogin || a === authorName);
+            if (!matches) continue;
+          }
 
           const commitDateObj = new Date(item.commit.author.date);
           const dateStr = commitDateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
@@ -357,17 +372,78 @@ export async function fetchSingleDateNode(dateStr) {
 }
 
 /**
- * Read submitted dates from history.json
+ * Read submitted dates from history.json candidates
  */
 export function getSubmittedDatesSet() {
   try {
     const config = resolveSimpklConfig();
-    if (config.historyFile && fs.existsSync(config.historyFile)) {
-      const data = JSON.parse(fs.readFileSync(config.historyFile, 'utf-8'));
-      return new Set(Object.keys(data));
+    const fileDir = path.dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      config.historyFile,
+      path.resolve(process.cwd(), 'data/simpkl_history.json'),
+      path.resolve(config.dir, 'history.json'),
+      path.resolve(fileDir, 'scripts/history.json'),
+      '/home/putra/Project-Coding/tools-scraping-jurnal/history.json',
+      path.join(os.homedir(), 'Project-Coding/tools-scraping-jurnal/history.json'),
+    ].filter(Boolean);
+
+    for (const f of candidates) {
+      if (fs.existsSync(f)) {
+        try {
+          const raw = fs.readFileSync(f, 'utf-8');
+          const data = JSON.parse(raw);
+          const keys = Object.keys(data);
+          if (keys.length > 0) {
+            return new Set(keys);
+          }
+        } catch {}
+      }
     }
   } catch {}
   return new Set();
+}
+
+/**
+ * Record a single date to all candidate history files
+ */
+export function recordSubmittedDate(dateStr, catatan = 'Tercatat di SIMPKL') {
+  try {
+    const config = resolveSimpklConfig();
+    const fileDir = path.dirname(fileURLToPath(import.meta.url));
+    const filesToUpdate = new Set([
+      config.historyFile,
+      path.resolve(process.cwd(), 'data/simpkl_history.json'),
+      path.resolve(config.dir, 'history.json'),
+      path.resolve(fileDir, 'scripts/history.json'),
+    ]);
+
+    for (const filePath of filesToUpdate) {
+      if (!filePath) continue;
+      try {
+        let data = {};
+        if (fs.existsSync(filePath)) {
+          data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        }
+        data[dateStr] = {
+          catatan,
+          submitted_at: new Date().toISOString(),
+        };
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      } catch {}
+    }
+  } catch {}
+}
+
+/**
+ * Set last submitted date manually
+ */
+export function setSimpklLastSubmittedDate(targetDateStr) {
+  if (!targetDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(targetDateStr)) {
+    throw new Error('Format tanggal salah. Gunakan YYYY-MM-DD');
+  }
+  recordSubmittedDate(targetDateStr, 'Diset manual oleh user');
+  return getSimpklWorkweekTracking();
 }
 
 /**
@@ -381,7 +457,8 @@ export function getSimpklWorkweekTracking() {
 
   let searchStart;
   if (lastSubmittedDate) {
-    const lastDateObj = new Date(lastSubmittedDate);
+    const [y, m, d] = lastSubmittedDate.split('-').map(Number);
+    const lastDateObj = new Date(y, m - 1, d);
     const nextDay = new Date(lastDateObj);
     nextDay.setDate(nextDay.getDate() + 1);
     while (nextDay.getDay() === 0 || nextDay.getDay() === 6) {
@@ -394,33 +471,38 @@ export function getSimpklWorkweekTracking() {
     searchStart = d;
   }
 
-  const startMonday = new Date(getMondayOfDate(searchStart));
+  const startMondayStr = getMondayOfDate(searchStart);
   const now = new Date();
-  const currentMonday = new Date(getMondayOfDate(now));
+  const currentMondayStr = getMondayOfDate(now);
+
+  const [sy, sm, sd] = startMondayStr.split('-').map(Number);
+  let curr = new Date(sy, sm - 1, sd);
+  const [cy, cm, cd] = currentMondayStr.split('-').map(Number);
+  const endLimit = new Date(cy, cm - 1, cd);
 
   const unsubmittedWeeks = [];
-  let curr = new Date(startMonday);
 
-  while (curr <= currentMonday) {
-    const monStr = curr.toISOString().split('T')[0];
+  while (curr <= endLimit) {
+    const monStr = `${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`;
     const friObj = new Date(curr);
     friObj.setDate(friObj.getDate() + 4);
-    const friStr = friObj.toISOString().split('T')[0];
+    const friStr = `${friObj.getFullYear()}-${String(friObj.getMonth() + 1).padStart(2, '0')}-${String(friObj.getDate()).padStart(2, '0')}`;
 
     let missingDays = 0;
     for (let i = 0; i < 5; i++) {
       const checkD = new Date(curr);
       checkD.setDate(checkD.getDate() + i);
-      const dStr = checkD.toISOString().split('T')[0];
+      const dStr = `${checkD.getFullYear()}-${String(checkD.getMonth() + 1).padStart(2, '0')}-${String(checkD.getDate()).padStart(2, '0')}`;
       if (!submittedDates.has(dStr)) {
         missingDays++;
       }
     }
 
-    const isCurrent = monStr === getMondayOfDate(now);
-    const prevMonObj = new Date(currentMonday);
+    const isCurrent = monStr === currentMondayStr;
+    const prevMonObj = new Date(endLimit);
     prevMonObj.setDate(prevMonObj.getDate() - 7);
-    const isPrevious = monStr === prevMonObj.toISOString().split('T')[0];
+    const prevMonStr = `${prevMonObj.getFullYear()}-${String(prevMonObj.getMonth() + 1).padStart(2, '0')}-${String(prevMonObj.getDate()).padStart(2, '0')}`;
+    const isPrevious = monStr === prevMonStr;
 
     let label = `${monStr} s.d. ${friStr}`;
     if (isCurrent) label += ' (Minggu Ini)';
@@ -777,7 +859,7 @@ export function buildSimpklMainMenu() {
     .text('[ Jurnal Kemarin ]', 'simpkl_yesterday')
     .row()
     .text('[ Riwayat 10 Jurnal ]', 'simpkl_history')
-    .text('[ Info Konfigurasi ]', 'simpkl_info')
+    .text('[ Sinkron Portal ]', 'simpkl_sync_portal')
     .row()
     .text('[ Menu Utama Bot ]', 'menu_main');
 
@@ -971,6 +1053,7 @@ export async function handleDateSubmit(ctx, dateStr) {
       throw new Error(submitRes.message || 'Gagal mengirim jurnal');
     }
 
+    recordSubmittedDate(dateStr, catatan);
     draftNotes.delete(`${userId}:${dateStr}`);
 
     let text = `<b>[ BERHASIL DISUBMIT ]</b>\n\n`;
@@ -1095,6 +1178,10 @@ export async function handleBatchSubmit(ctx, startDate) {
 
     res.results.forEach((r) => {
       text += `• <b>${r.date}</b>: [${r.status.toUpperCase()}] - ${escapeHtml(r.message)}\n`;
+      if (r.status === 'success' || r.status === 'skipped') {
+        const itemCatatan = batchData.items?.find((it) => it.date === r.date)?.summary || r.message;
+        recordSubmittedDate(r.date, itemCatatan);
+      }
     });
 
     text += `\nSeluruh jurnal yang berhasil telah tersimpan di portal SIMPKL dan dicatat ke history.\n\n`;
@@ -1159,6 +1246,44 @@ export async function handleSimpklCallback(ctx, data) {
       .text('[ Menu SIMPKL ]', 'simpkl_menu')
       .text('[ Date Picker ]', 'simpkl_cal_open');
     return await safeEditOrReply(ctx, text, keyboard);
+  }
+
+  if (data === 'simpkl_sync_portal') {
+    await safeEditOrReply(ctx, '<b>[ SINKRONISASI ]</b> Menghubungkan ke portal SIMPKL untuk mengecek riwayat jurnal...');
+    try {
+      const res = await runSimpklRunner('sync');
+      if (res.status !== 'success') {
+        throw new Error(res.message || 'Gagal sinkronisasi');
+      }
+      if (Array.isArray(res.dates)) {
+        res.dates.forEach((d) => recordSubmittedDate(d, 'Tercatat di SIMPKL'));
+      }
+      const tracking = getSimpklWorkweekTracking();
+      let text = `<b>[ SINKRONISASI PORTAL BERHASIL ]</b>\n\n`;
+      text += `Total Jurnal Tercatat: <b>${res.total_existing}</b>\n`;
+      text += `Entri Baru Ditambahkan: <b>${res.synced_new}</b>\n\n`;
+      text += `Status Urutan:\n`;
+      text += `• Terakhir Disubmit: <b>${tracking.lastSubmittedDate || 'Belum ada'}</b>\n`;
+      text += `• Minggu Belum Disubmit: <b>${tracking.totalWeeksBehind} Minggu Tertinggal</b>\n`;
+      if (tracking.targetWeek) {
+        text += `• Antrean Berikutnya: <b>${escapeHtml(tracking.targetWeek.label)}</b>\n`;
+      }
+
+      const keyboard = new InlineKeyboard();
+      if (tracking.totalWeeksBehind > 0) {
+        keyboard.text('[ Submit Jurnal Urut ]', 'simpkl_submit_flow:auto').row();
+      }
+      keyboard
+        .text('[ Date Picker ]', 'simpkl_cal_open')
+        .text('[ Riwayat Jurnal ]', 'simpkl_history')
+        .row()
+        .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+      return await safeEditOrReply(ctx, text, keyboard);
+    } catch (err) {
+      const keyboard = new InlineKeyboard().text('[ Menu SIMPKL ]', 'simpkl_menu');
+      return await safeEditOrReply(ctx, `<b>[ GAGAL SINKRONISASI ]</b> ${escapeHtml(err.message)}`, keyboard);
+    }
   }
 
   if (data === 'simpkl_submit_flow:auto') {
@@ -1677,7 +1802,7 @@ export function registerSimpklCommands() {
       }
 
       // /simpkl fill YYYY-MM-DD <catatan> (Submit instan)
-      if (sub === 'fill' || sub === 'submit') {
+      if (sub === 'fill') {
         const targetDate = args[1];
         const newCatatan = args.slice(2).join(' ').trim();
 
@@ -1688,6 +1813,83 @@ export function registerSimpklCommands() {
         const userId = String(ctx.from?.id || 'default');
         draftNotes.set(`${userId}:${targetDate}`, newCatatan);
         return await handleDateSubmit(ctx, targetDate);
+      }
+
+      // /simpkl setlast [YYYY-MM-DD]
+      if (sub === 'setlast' || sub === 'synclast') {
+        const targetDate = args[1] || '2026-09-25';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+          return await ctx.reply('Format tanggal salah. Gunakan YYYY-MM-DD, contoh:\n/simpkl setlast 2026-09-25');
+        }
+        recordSubmittedDate(targetDate, 'Diset manual oleh user');
+        const tracking = getSimpklWorkweekTracking();
+        let text = `<b>[ SINKRONISASI TANGGAL TERAKHIR ]</b>\n\n`;
+        text += `Tanggal terakhir submit berhasil diset ke: <b>${targetDate}</b>\n\n`;
+        text += `Status Riwayat Sekarang:\n`;
+        text += `• Terakhir Disubmit: <b>${tracking.lastSubmittedDate || 'Belum ada'}</b>\n`;
+        text += `• Minggu Belum Disubmit: <b>${tracking.totalWeeksBehind} Minggu Tertinggal</b>\n`;
+        if (tracking.targetWeek) {
+          text += `• Target Antrean Urutan: <b>${escapeHtml(tracking.targetWeek.label)}</b>\n\n`;
+          text += `Ketik <code>/simpkl submit</code> untuk melanjutkan pengisian urut.`;
+        } else {
+          text += `\nSeluruh jurnal hingga minggu ini sudah lengkap terisi!`;
+        }
+
+        const keyboard = new InlineKeyboard();
+        if (tracking.totalWeeksBehind > 0) {
+          keyboard.text('[ Mulai Submit Urut ]', 'simpkl_submit_flow:auto').row();
+        }
+        keyboard
+          .text('[ Date Picker ]', 'simpkl_cal_open')
+          .text('[ Riwayat Jurnal ]', 'simpkl_history')
+          .row()
+          .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+        return await ctx.reply(text, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
+      }
+
+      // /simpkl sync
+      if (sub === 'sync' || sub === 'portal') {
+        await ctx.reply('Menghubungkan ke portal SIMPKL untuk sinkronisasi riwayat jurnal...');
+        try {
+          const res = await runSimpklRunner('sync');
+          if (res.status !== 'success') {
+            throw new Error(res.message || 'Gagal sinkronisasi');
+          }
+          if (Array.isArray(res.dates)) {
+            res.dates.forEach((d) => recordSubmittedDate(d, 'Tercatat di SIMPKL'));
+          }
+          const tracking = getSimpklWorkweekTracking();
+          let text = `<b>[ SINKRONISASI PORTAL BERHASIL ]</b>\n\n`;
+          text += `Total Jurnal Tercatat: <b>${res.total_existing}</b>\n`;
+          text += `Entri Baru Ditambahkan: <b>${res.synced_new}</b>\n\n`;
+          text += `Status Tracking:\n`;
+          text += `• Terakhir Disubmit: <b>${tracking.lastSubmittedDate || 'Belum ada'}</b>\n`;
+          text += `• Minggu Belum Disubmit: <b>${tracking.totalWeeksBehind} Minggu Tertinggal</b>\n`;
+          if (tracking.targetWeek) {
+            text += `• Antrean Berikutnya: <b>${escapeHtml(tracking.targetWeek.label)}</b>\n`;
+          }
+
+          const keyboard = new InlineKeyboard();
+          if (tracking.totalWeeksBehind > 0) {
+            keyboard.text('[ Submit Jurnal Urut ]', 'simpkl_submit_flow:auto').row();
+          }
+          keyboard
+            .text('[ Date Picker ]', 'simpkl_cal_open')
+            .text('[ Riwayat Jurnal ]', 'simpkl_history')
+            .row()
+            .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+          return await ctx.reply(text, {
+            parse_mode: 'HTML',
+            reply_markup: keyboard,
+          });
+        } catch (err) {
+          return await ctx.reply(`[!] Gagal sinkronisasi dengan portal SIMPKL: ${err.message}`);
+        }
       }
 
       // Default: Buka Menu Utama SIMPKL

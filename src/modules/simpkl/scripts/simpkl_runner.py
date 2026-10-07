@@ -53,18 +53,26 @@ from github_fetcher import fetch_commits, summarize_commits, WIB
 
 # Robust history.json resolution
 CANDIDATE_HISTORIES = [
-    "/home/putra/Project-Coding/tools-scraping-jurnal/history.json",
+    os.getenv("SIMPKL_HISTORY_FILE", "").strip(),
+    os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_history.json")),
+    os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_history.json")),
     os.path.join(BASE_DIR, "history.json"),
+    os.path.expanduser("~/Project-Coding/tools-scraping-jurnal/history.json"),
+    "/home/putra/Project-Coding/tools-scraping-jurnal/history.json",
 ]
+CANDIDATE_HISTORIES = [h for h in CANDIDATE_HISTORIES if h]
 HISTORY_FILE = next((h for h in CANDIDATE_HISTORIES if os.path.exists(h)), os.path.join(BASE_DIR, "history.json"))
 
 def load_history():
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    for fpath in [HISTORY_FILE] + CANDIDATE_HISTORIES:
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    if isinstance(content, dict) and len(content) > 0:
+                        return content
+            except Exception:
+                pass
     return {}
 
 def save_history(date_str, catatan):
@@ -73,16 +81,27 @@ def save_history(date_str, catatan):
         "catatan": catatan,
         "submitted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    targets = set([HISTORY_FILE, os.path.join(BASE_DIR, "history.json")])
+    for cand in CANDIDATE_HISTORIES:
+        if os.path.exists(cand) or os.path.basename(cand) in ["simpkl_history.json", "history.json"]:
+            targets.add(cand)
+    for tgt in targets:
+        try:
+            os.makedirs(os.path.dirname(tgt), exist_ok=True)
+            with open(tgt, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
 
 def get_config():
+    authors_raw = os.getenv("GITHUB_AUTHORS", "putrarawr,WisWho,Paissaiueo,broiosme,Fais Adhyasta Pratama").strip()
+    authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
     return {
         "username": os.getenv("SIMPKL_USERNAME", "").strip(),
         "password": os.getenv("SIMPKL_PASSWORD", "").strip(),
         "github_token": os.getenv("GITHUB_TOKEN", "").strip() or None,
         "repos": [r.strip() for r in os.getenv("GITHUB_REPOS", "putrarawr/cafe-pos").split(",") if r.strip()],
-        "authors": [a.strip() for a in os.getenv("GITHUB_AUTHORS", "WisWho,putrarawr").split(",") if a.strip()],
+        "authors": authors,
         "chrome_binary": os.getenv("CHROME_BINARY", "").strip() or None,
     }
 
@@ -320,9 +339,43 @@ def action_batch_submit(entries):
         if bot:
             bot.close()
 
+def action_sync():
+    """Sync submitted dates directly from SIMPKL portal without submitting."""
+    cfg = get_config()
+    if not cfg["username"] or not cfg["password"]:
+        return {"status": "error", "message": "SIMPKL_USERNAME atau SIMPKL_PASSWORD belum diatur"}
+
+    bot = None
+    try:
+        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
+        logged_in = bot.login(cfg["username"], cfg["password"])
+        if not logged_in:
+            return {"status": "error", "message": "Gagal login ke SIMPKL. Periksa NISN atau password"}
+
+        existing_dates = bot.get_existing_dates()
+        synced_count = 0
+        data = load_history()
+        for d in existing_dates:
+            if d not in data:
+                save_history(d, "Tercatat di SIMPKL")
+                synced_count += 1
+
+        return {
+            "status": "success",
+            "message": f"Berhasil sinkronisasi {len(existing_dates)} tanggal dari SIMPKL portal ({synced_count} entri baru)",
+            "total_existing": len(existing_dates),
+            "synced_new": synced_count,
+            "dates": sorted(list(existing_dates))
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Eksepsi SIMPKL sync: {str(e)}"}
+    finally:
+        if bot:
+            bot.close()
+
 def main():
     parser = argparse.ArgumentParser(description="SIMPKL Runner CLI")
-    parser.add_argument("--action", choices=["fetch", "history", "submit", "batch-fetch", "batch-submit"], required=True)
+    parser.add_argument("--action", choices=["fetch", "history", "submit", "batch-fetch", "batch-submit", "sync"], required=True)
     parser.add_argument("--date", help="Tanggal format YYYY-MM-DD")
     parser.add_argument("--catatan", help="Isi catatan kegiatan")
     parser.add_argument("--entries", help="JSON array entri untuk batch submit")
@@ -361,6 +414,10 @@ def main():
             print(json.dumps({"status": "error", "message": "--entries diperlukan"}))
             sys.exit(1)
         res = action_batch_submit(args.entries)
+        print(json.dumps(res, ensure_ascii=False))
+
+    elif args.action == "sync":
+        res = action_sync()
         print(json.dumps(res, ensure_ascii=False))
 
 if __name__ == "__main__":

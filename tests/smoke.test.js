@@ -54,6 +54,7 @@ import {
   LOOP_PRESETS,
   VARY_PACKAGES,
   getSimpklWorkweekTracking,
+  setSimpklLastSubmittedDate,
   pendingSimpklPrompts,
   handleSimpklMessageInterceptor,
 } from '../src/modules/simpkl/index.js';
@@ -949,13 +950,29 @@ async function runAllTests() {
 
   await test('getSimpklWorkweekTracking computes unsubmitted weeks and target queue in order', () => {
     const tracking = getSimpklWorkweekTracking();
-    assert.ok(typeof tracking.totalWeeksBehind === 'number', 'totalWeeksBehind must be a number');
-    assert.ok(Array.isArray(tracking.unsubmittedWeeks), 'unsubmittedWeeks must be an array');
-    if (tracking.totalWeeksBehind > 0) {
-      assert.ok(tracking.targetWeek, 'targetWeek must be defined when weeks are behind');
-      assert.ok(tracking.targetWeek.monday, 'targetWeek must have a monday date');
-      assert.ok(tracking.targetWeek.friday, 'targetWeek must have a friday date');
-    }
+    assert.equal(tracking.lastSubmittedDate, '2026-09-25', 'Last submitted date must match Friday 25 Sep 2026');
+    assert.equal(tracking.totalWeeksBehind, 2, 'Exactly 2 unsubmitted weeks must remain');
+    assert.equal(tracking.unsubmittedWeeks.length, 2, 'Unsubmitted weeks array must have 2 items');
+
+    // First in queue: Week of 2026-09-28 to 2026-10-02
+    assert.equal(tracking.unsubmittedWeeks[0].monday, '2026-09-28');
+    assert.equal(tracking.unsubmittedWeeks[0].friday, '2026-10-02');
+    assert.equal(tracking.unsubmittedWeeks[0].isPrevious, true, 'First queue is Minggu Lalu');
+
+    // Second in queue: Week of 2026-10-05 to 2026-10-09
+    assert.equal(tracking.unsubmittedWeeks[1].monday, '2026-10-05');
+    assert.equal(tracking.unsubmittedWeeks[1].friday, '2026-10-09');
+    assert.equal(tracking.unsubmittedWeeks[1].isCurrent, true, 'Second queue is Minggu Ini');
+
+    // Target week is the earliest unsubmitted week
+    assert.equal(tracking.targetWeek.monday, '2026-09-28');
+    assert.equal(tracking.targetWeek.friday, '2026-10-02');
+  });
+
+  await test('setSimpklLastSubmittedDate updates history and recomputes tracking', () => {
+    const refreshed = setSimpklLastSubmittedDate('2026-09-25');
+    assert.equal(refreshed.lastSubmittedDate, '2026-09-25');
+    assert.equal(refreshed.totalWeeksBehind, 2);
   });
 
   await test('handleSimpklMessageInterceptor intercepts 1-sentence reply and applies to 4 days', async () => {
