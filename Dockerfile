@@ -24,8 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV CHROME_BINARY=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
-ENV SIMPKL_USERNAME=0081361735
-ENV SIMPKL_PASSWORD=rexx12345rawr
 
 # Set working directory
 WORKDIR /app
