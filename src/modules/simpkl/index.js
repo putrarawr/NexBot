@@ -10,13 +10,16 @@ const VENV_PYTHON = path.join(SIMPKL_DIR, '.venv/bin/python3');
 const RUNNER_SCRIPT = path.join(SIMPKL_DIR, 'simpkl_runner.py');
 const HISTORY_FILE = path.join(SIMPKL_DIR, 'history.json');
 
-// In-memory draft store: `${userId}:${dateStr}` -> custom note
+// In-memory draft stores
 const draftNotes = new Map();
+const batchDrafts = new Map();
 
 const MONTH_NAMES = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
 ];
+
+const DEFAULT_WORK_NOTE = 'Melakukan pengujian fitur dan pemeliharaan aplikasi cafe-pos.';
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -44,6 +47,17 @@ async function safeEditOrReply(ctx, text, keyboard = null) {
 }
 
 /**
+ * Get Monday date string YYYY-MM-DD for a given date
+ */
+export function getMondayOfDate(dateInput = null) {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
+/**
  * Execute simpkl_runner.py and parse JSON output
  */
 export async function runSimpklRunner(action, params = {}) {
@@ -56,13 +70,15 @@ export async function runSimpklRunner(action, params = {}) {
   const args = [RUNNER_SCRIPT, '--action', action];
   if (params.date) args.push('--date', params.date);
   if (params.catatan) args.push('--catatan', params.catatan);
+  if (params.entries) args.push('--entries', params.entries);
   if (params.limit) args.push('--limit', String(params.limit));
+  if (params.count) args.push('--count', String(params.count));
 
   return new Promise((resolve, reject) => {
     execFile(
       pythonBin,
       args,
-      { cwd: SIMPKL_DIR, timeout: 120000 },
+      { cwd: SIMPKL_DIR, timeout: 180000 },
       (error, stdout, stderr) => {
         if (error) {
           const errMsg = stderr?.trim() || error.message;
@@ -167,6 +183,7 @@ export function buildDatePicker(year, month, submittedDates = new Set()) {
   keyboard
     .text(`[ Hari Ini: ${todayStr} ]`, `simpkl_pick:${todayStr}`)
     .row()
+    .text('[ Submit Batch 5 Hari ]', 'simpkl_batch_menu')
     .text('[ Menu Utama SIMPKL ]', 'simpkl_menu');
 
   let text = `<b>[ PEMILIH TANGGAL (DATE PICKER) ]</b>\n\n`;
@@ -183,6 +200,8 @@ export function buildDatePicker(year, month, submittedDates = new Set()) {
 export function buildSimpklMainMenu() {
   const keyboard = new InlineKeyboard()
     .text('[ Buka Date Picker / Kalender ]', 'simpkl_cal_open')
+    .row()
+    .text('[ Submit Batch 5 Hari Kerja ]', 'simpkl_batch_menu')
     .row()
     .text('[ Jurnal Hari Ini ]', 'simpkl_today')
     .text('[ Jurnal Kemarin ]', 'simpkl_yesterday')
@@ -249,6 +268,8 @@ export async function handleDateSelection(ctx, dateStr) {
     }
 
     keyboard
+      .text('[ Mulai 5 Hari dari Tanggal Ini ]', `simpkl_batch_start:${dateStr}`)
+      .row()
       .text('[ Edit Catatan ]', `simpkl_edit:${dateStr}`)
       .text('[ Date Picker ]', 'simpkl_cal_open')
       .row()
@@ -324,6 +345,138 @@ export async function handleDateSubmit(ctx, dateStr) {
 }
 
 /**
+ * Handle Batch 5 Days Selection & Preview
+ */
+export async function handleBatchSelection(ctx, startDate) {
+  await safeEditOrReply(
+    ctx,
+    `<b>[ MEMUAT BATCH ]</b> Mengambil data commit GitHub untuk 5 hari kerja mulai tanggal <code>${startDate}</code>...`
+  );
+
+  try {
+    const res = await runSimpklRunner('batch-fetch', { date: startDate, count: 5 });
+    if (res.status !== 'success') {
+      throw new Error(res.message || 'Gagal memproses batch');
+    }
+
+    const userId = String(ctx.from?.id || 'default');
+
+    // Fill notes with custom drafts or fallback
+    const enrichedItems = res.items.map((item) => {
+      const custom = draftNotes.get(`${userId}:${item.date}`);
+      const summary = custom || item.summary || item.previous_catatan || DEFAULT_WORK_NOTE;
+      return {
+        ...item,
+        summary,
+      };
+    });
+
+    batchDrafts.set(userId, {
+      startDate,
+      items: enrichedItems,
+    });
+
+    let text = `<b>[ DRAF BATCH 5 HARI KERJA ]</b>\n\n`;
+    text += `Periode: <b>${res.start_date}</b> s.d. <b>${res.end_date}</b>\n`;
+    text += `Total: <b>${res.total_days} Hari Kerja (Senin - Jumat)</b>\n\n`;
+
+    enrichedItems.forEach((it, idx) => {
+      const statusLabel = it.already_submitted ? '[SUDAH TERCATAT]' : '[BELUM TERSIMPAN]';
+      const commitLabel = it.has_commits ? `${it.commit_count} commit` : '0 commit';
+      text += `<b>${idx + 1}. ${it.date} (${it.day})</b> - ${commitLabel} - ${statusLabel}\n`;
+      text += `<i>${escapeHtml(it.summary.slice(0, 120))}${it.summary.length > 120 ? '...' : ''}</i>\n\n`;
+    });
+
+    text += `Periksa catatan di atas. Tekan tombol di bawah untuk langsung mengirim seluruh 5 jurnal ke SIMPKL:`;
+
+    const keyboard = new InlineKeyboard()
+      .text('[ Submit 5 Hari Sekaligus ]', `simpkl_batch_submit:${startDate}`)
+      .row()
+      .text('[ Date Picker ]', 'simpkl_cal_open')
+      .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+    await safeEditOrReply(ctx, text, keyboard);
+  } catch (err) {
+    const keyboard = new InlineKeyboard()
+      .text('[ Coba Lagi ]', `simpkl_batch_start:${startDate}`)
+      .text('[ Date Picker ]', 'simpkl_cal_open');
+
+    await safeEditOrReply(
+      ctx,
+      `<b>[ ERROR ]</b> Gagal memproses batch ${startDate}: ${escapeHtml(err.message)}`,
+      keyboard
+    );
+  }
+}
+
+/**
+ * Handle Batch 5 Days Submission to SIMPKL
+ */
+export async function handleBatchSubmit(ctx, startDate) {
+  const userId = String(ctx.from?.id || 'default');
+  let batchData = batchDrafts.get(userId);
+
+  if (!batchData || batchData.startDate !== startDate) {
+    const fetchRes = await runSimpklRunner('batch-fetch', { date: startDate, count: 5 });
+    const items = fetchRes.items.map((it) => ({
+      ...it,
+      summary: it.summary || it.previous_catatan || DEFAULT_WORK_NOTE,
+    }));
+    batchData = { startDate, items };
+  }
+
+  await safeEditOrReply(
+    ctx,
+    `<b>[ PROSES BATCH ]</b> Membuka browser headless, login ke SIMPKL, dan mengirim 5 jurnal sekaligus...\n\nProses memerlukan waktu sekitar 30 - 60 detik. Mohon tunggu...`
+  );
+
+  try {
+    const entries = batchData.items.map((it) => ({
+      date: it.date,
+      catatan: it.summary,
+    }));
+
+    const res = await runSimpklRunner('batch-submit', {
+      entries: JSON.stringify(entries),
+    });
+
+    if (res.status !== 'success') {
+      throw new Error(res.message || 'Gagal batch submit');
+    }
+
+    batchDrafts.delete(userId);
+
+    let text = `<b>[ LAPORAN BATCH 5 HARI SIMPKL ]</b>\n\n`;
+    text += `Periode Mulai: <b>${startDate}</b>\n`;
+    text += `Total Entri: <b>${res.total} Jurnal Diproses</b>\n\n`;
+
+    res.results.forEach((r) => {
+      text += `• <b>${r.date}</b>: [${r.status.toUpperCase()}] - ${escapeHtml(r.message)}\n`;
+    });
+
+    text += `\nSeluruh jurnal yang berhasil telah tersimpan di portal SIMPKL dan dicatat ke history.`;
+
+    const keyboard = new InlineKeyboard()
+      .text('[ Date Picker ]', 'simpkl_cal_open')
+      .text('[ Riwayat Jurnal ]', 'simpkl_history')
+      .row()
+      .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+    await safeEditOrReply(ctx, text, keyboard);
+  } catch (err) {
+    const keyboard = new InlineKeyboard()
+      .text('[ Coba Submit Lagi ]', `simpkl_batch_submit:${startDate}`)
+      .text('[ Kembali ke Draf ]', `simpkl_batch_start:${startDate}`);
+
+    await safeEditOrReply(
+      ctx,
+      `<b>[ GAGAL BATCH SUBMIT ]</b>\n\nKeterangan: ${escapeHtml(err.message)}`,
+      keyboard
+    );
+  }
+}
+
+/**
  * Main Telegram Callback Query Handler for SIMPKL (NO EMOJIS)
  */
 export async function handleSimpklCallback(ctx, data) {
@@ -337,6 +490,21 @@ export async function handleSimpklCallback(ctx, data) {
     const submitted = getSubmittedDatesSet();
     const cal = buildDatePicker(now.getFullYear(), now.getMonth() + 1, submitted);
     return await safeEditOrReply(ctx, cal.text, cal.keyboard);
+  }
+
+  if (data === 'simpkl_batch_menu') {
+    const mondayStr = getMondayOfDate();
+    return await handleBatchSelection(ctx, mondayStr);
+  }
+
+  if (data.startsWith('simpkl_batch_start:')) {
+    const startDate = data.replace('simpkl_batch_start:', '');
+    return await handleBatchSelection(ctx, startDate);
+  }
+
+  if (data.startsWith('simpkl_batch_submit:')) {
+    const startDate = data.replace('simpkl_batch_submit:', '');
+    return await handleBatchSubmit(ctx, startDate);
   }
 
   if (data.startsWith('simpkl_cal:')) {
@@ -428,6 +596,7 @@ export async function handleSimpklCallback(ctx, data) {
     text += `Perintah Cepat:\n`;
     text += `• <code>/simpkl</code> - Menu utama\n`;
     text += `• <code>/simpkl cal</code> - Buka Date Picker\n`;
+    text += `• <code>/simpkl 5days [YYYY-MM-DD]</code> - Submit 5 hari kerja\n`;
     text += `• <code>/simpkl today</code> - Draf hari ini\n`;
     text += `• <code>/simpkl date YYYY-MM-DD</code> - Cek tanggal\n`;
     text += `• <code>/simpkl set YYYY-MM-DD &lt;catatan&gt;</code> - Edit draf\n`;
@@ -454,7 +623,7 @@ export function registerSimpklCommands() {
     aliases: ['jurnal', 'pkl', 'prakerin'],
     category: 'tools',
     description: 'Auto-filler jurnal SIMPKL dari commit GitHub dengan Date Picker interaktif',
-    usage: '/simpkl [cal | today | date YYYY-MM-DD | history | set ... | fill ...]',
+    usage: '/simpkl [cal | 5days [tgl] | today | date YYYY-MM-DD | history | set ... | fill ...]',
     platforms: ['telegram'],
     async execute({ ctx, reply, args }) {
       if (!ctx?.reply) {
@@ -472,6 +641,16 @@ export function registerSimpklCommands() {
           parse_mode: 'HTML',
           reply_markup: cal.keyboard,
         });
+      }
+
+      // /simpkl 5days [YYYY-MM-DD] atau /simpkl batch [YYYY-MM-DD] atau /simpkl week
+      if (sub === '5days' || sub === 'batch' || sub === 'week' || sub === '5hari') {
+        const paramDate = args[1];
+        let startDate = getMondayOfDate();
+        if (paramDate && /^\d{4}-\d{2}-\d{2}$/.test(paramDate)) {
+          startDate = paramDate;
+        }
+        return await handleBatchSelection(ctx, startDate);
       }
 
       // /simpkl today

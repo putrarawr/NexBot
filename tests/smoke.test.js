@@ -41,7 +41,7 @@ import { isCommandSupported } from '../src/bot/handler.js';
 import { registerUtilityTools } from '../src/modules/tools/index.js';
 import { registerVeriftokCommands, extractTikTokUrl, formatScoreBar } from '../src/modules/veriftok/index.js';
 import { createTicTacToeSession, renderTicTacToeBoard, checkTicTacToeWinner, makeBotMove, playRpsRound } from '../src/modules/game/visual-games.js';
-import { registerSimpklCommands, buildDatePicker, buildSimpklMainMenu } from '../src/modules/simpkl/index.js';
+import { registerSimpklCommands, buildDatePicker, buildSimpklMainMenu, getMondayOfDate } from '../src/modules/simpkl/index.js';
 let passedTests = 0;
 let failedTests = 0;
 
@@ -855,8 +855,13 @@ async function runAllTests() {
 
     const json = JSON.stringify(menu.keyboard);
     assert.ok(json.includes('simpkl_cal_open'), 'Should have button to open Date Picker');
+    assert.ok(json.includes('simpkl_batch_menu'), 'Should have button for 5 days batch submit');
     assert.ok(json.includes('simpkl_today'), 'Should have button for today');
     assert.ok(json.includes('simpkl_history'), 'Should have button for history');
+
+    // Test getMondayOfDate helper
+    const monday = getMondayOfDate('2026-10-07');
+    assert.equal(monday, '2026-10-05', 'Wednesday 2026-10-07 should resolve to Monday 2026-10-05');
 
     // STRICT ZERO EMOJI CHECK
     const emojiRegex = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
