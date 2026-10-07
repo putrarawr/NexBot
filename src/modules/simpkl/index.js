@@ -249,10 +249,11 @@ export function saveSimpklCredentials(username, password) {
  * Save SIMPKL session cookie (ci_session) directly
  */
 export function saveSimpklSessionCookie(cookieValue) {
+  const cleanVal = cookieValue.replace(/^ci_session=/i, '').replace(/;.*$/, '').trim();
   const cookieData = [
     {
       name: 'ci_session',
-      value: cookieValue.trim(),
+      value: cleanVal,
       domain: 'pkl.smk1bws.sch.id',
       path: '/',
       secure: true,
@@ -263,6 +264,8 @@ export function saveSimpklSessionCookie(cookieValue) {
   const targets = [
     path.resolve(process.cwd(), 'data/simpkl_cookies.json'),
     path.resolve(fileDir, 'scripts/simpkl_cookies.json'),
+    path.resolve(fileDir, 'simpkl_cookies.json'),
+    path.resolve(process.cwd(), 'src/modules/simpkl/scripts/simpkl_cookies.json'),
   ];
   for (const t of targets) {
     try {
@@ -273,11 +276,40 @@ export function saveSimpklSessionCookie(cookieValue) {
 }
 
 /**
+ * Get active SIMPKL session cookie value from disk
+ */
+export function getSimpklSavedCookie() {
+  const fileDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(process.cwd(), 'data/simpkl_cookies.json'),
+    path.resolve(fileDir, 'scripts/simpkl_cookies.json'),
+    path.resolve(fileDir, 'simpkl_cookies.json'),
+    path.resolve(process.cwd(), 'src/modules/simpkl/scripts/simpkl_cookies.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data)) {
+          const ci = data.find((c) => c.name === 'ci_session');
+          if (ci?.value) return ci.value;
+        } else if (data?.ci_session) {
+          return data.ci_session;
+        }
+      }
+    } catch {}
+  }
+  return null;
+}
+
+/**
  * Execute simpkl_runner.py and parse JSON output
  */
 export async function runSimpklRunner(action, params = {}) {
   const config = resolveSimpklConfig();
   const creds = getSimpklCredentials();
+  const savedCookie = getSimpklSavedCookie();
 
   const args = [config.runnerScript, '--action', action];
   if (params.date) args.push('--date', params.date);
@@ -287,11 +319,13 @@ export async function runSimpklRunner(action, params = {}) {
   if (params.count) args.push('--count', String(params.count));
   if (creds.username) args.push('--username', creds.username);
   if (creds.password) args.push('--password', creds.password);
+  if (savedCookie) args.push('--cookie', savedCookie);
 
   const runnerEnv = {
     ...process.env,
     SIMPKL_USERNAME: creds.username || process.env.SIMPKL_USERNAME || '',
     SIMPKL_PASSWORD: creds.password || process.env.SIMPKL_PASSWORD || '',
+    ...(savedCookie ? { SIMPKL_COOKIE: savedCookie } : {}),
   };
 
   return new Promise((resolve, reject) => {

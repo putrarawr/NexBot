@@ -25,10 +25,11 @@ JURNAL_ADD_URL = f"{BASE_URL}/siswa/jurnal/add"
 
 
 class SIMPKLBot:
-    def __init__(self, chrome_binary: Optional[str] = None, headless: bool = False):
+    def __init__(self, chrome_binary: Optional[str] = None, headless: bool = False, cookie: Optional[str] = None):
         self.display = None
         self.driver = None
         self.last_error = ""
+        self.cookie = (cookie or os.environ.get("SIMPKL_COOKIE", "")).strip()
 
         # Check display availability
         # Cloudflare Turnstile is actively blocked by --headless=new.
@@ -174,13 +175,36 @@ class SIMPKLBot:
         return None
 
     @staticmethod
-    def _get_cookie_file_path() -> str:
+    def _find_cookie_file() -> Optional[str]:
         base = os.path.dirname(os.path.abspath(__file__))
         candidates = [
+            os.path.join(base, "simpkl_cookies.json"),
             os.path.abspath(os.path.join(base, "../../../../data/simpkl_cookies.json")),
             os.path.abspath(os.path.join(base, "../../../data/simpkl_cookies.json")),
             os.path.abspath(os.path.join(base, "../../data/simpkl_cookies.json")),
+            "/app/data/simpkl_cookies.json",
+            "/app/src/modules/simpkl/scripts/simpkl_cookies.json",
+            os.path.expanduser("~/Project-Coding/tools-scraping-jurnal/simpkl_cookies.json"),
+            "/home/putra/Project-Coding/tools-scraping-jurnal/simpkl_cookies.json",
+        ]
+        if os.environ.get("SIMPKL_COOKIE_FILE"):
+            candidates.insert(0, os.environ.get("SIMPKL_COOKIE_FILE"))
+        for c in candidates:
+            if os.path.exists(c) and os.path.getsize(c) > 5:
+                return c
+        return None
+
+    @staticmethod
+    def _get_cookie_file_path() -> str:
+        found = SIMPKLBot._find_cookie_file()
+        if found:
+            return found
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.abspath(os.path.join(base, "../../../data/simpkl_cookies.json")),
+            os.path.abspath(os.path.join(base, "../../../../data/simpkl_cookies.json")),
             os.path.join(base, "simpkl_cookies.json"),
+            "/app/data/simpkl_cookies.json",
         ]
         for c in candidates:
             if os.path.exists(os.path.dirname(c)):
@@ -190,35 +214,101 @@ class SIMPKLBot:
     def _save_cookies(self):
         try:
             cookies = self.driver.get_cookies()
-            fpath = self._get_cookie_file_path()
-            os.makedirs(os.path.dirname(fpath), exist_ok=True)
-            with open(fpath, "w", encoding="utf-8") as f:
-                json.dump(cookies, f, indent=2)
+            if not cookies:
+                return
+            base = os.path.dirname(os.path.abspath(__file__))
+            targets = [
+                os.path.join(base, "simpkl_cookies.json"),
+                os.path.abspath(os.path.join(base, "../../../../data/simpkl_cookies.json")),
+                os.path.abspath(os.path.join(base, "../../../data/simpkl_cookies.json")),
+                os.path.abspath(os.path.join(base, "../../data/simpkl_cookies.json")),
+                "/app/data/simpkl_cookies.json",
+                "/app/src/modules/simpkl/scripts/simpkl_cookies.json",
+                os.path.expanduser("~/Project-Coding/tools-scraping-jurnal/simpkl_cookies.json"),
+                "/home/putra/Project-Coding/tools-scraping-jurnal/simpkl_cookies.json",
+            ]
+            for t in targets:
+                try:
+                    if os.path.exists(os.path.dirname(t)):
+                        with open(t, "w", encoding="utf-8") as f:
+                            json.dump(cookies, f, indent=2)
+                except Exception:
+                    pass
             print("  Session cookies berhasil disimpan.")
         except Exception as e:
             print(f"  [!] Gagal menyimpan session cookies: {e}")
 
     def _load_cookies(self) -> bool:
-        fpath = self._get_cookie_file_path()
-        if not os.path.exists(fpath):
+        cookies = []
+        if getattr(self, "cookie", None):
+            val = self.cookie.replace("ci_session=", "").split(";")[0].strip()
+            if val:
+                cookies = [{
+                    "name": "ci_session",
+                    "value": val,
+                    "domain": "pkl.smk1bws.sch.id",
+                    "path": "/",
+                    "secure": True,
+                    "httpOnly": True,
+                }]
+
+        if not cookies:
+            fpath = self._find_cookie_file()
+            if fpath and os.path.exists(fpath):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, list) and len(data) > 0:
+                        cookies = data
+                    elif isinstance(data, dict) and "ci_session" in data:
+                        cookies = [{
+                            "name": "ci_session",
+                            "value": data["ci_session"],
+                            "domain": "pkl.smk1bws.sch.id",
+                            "path": "/",
+                            "secure": True,
+                            "httpOnly": True,
+                        }]
+                except Exception as e:
+                    print(f"  [!] Gagal membaca file session cookies: {e}")
+
+        if not cookies:
             return False
+
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                cookies = json.load(f)
-            if not isinstance(cookies, list) or not cookies:
-                return False
+            print("  Mencoba autentikasi via session cookies tersimpan...")
             self.driver.get(LOGIN_URL)
             time.sleep(1)
+
+            # CRITICAL: Delete any guest cookies generated by visiting /login
+            # so the authenticated session cookie takes complete precedence
+            try:
+                self.driver.delete_all_cookies()
+            except Exception:
+                pass
+
             for c in cookies:
                 try:
-                    self.driver.add_cookie(c)
+                    clean_c = {k: v for k, v in c.items() if k in ["name", "value", "domain", "path", "secure", "httpOnly", "expiry", "sameSite"]}
+                    self.driver.add_cookie(clean_c)
                 except Exception:
-                    pass
+                    try:
+                        self.driver.add_cookie({
+                            "name": c.get("name"),
+                            "value": c.get("value"),
+                            "path": c.get("path", "/"),
+                        })
+                    except Exception:
+                        pass
+
             self.driver.get(JURNAL_URL)
             time.sleep(2)
             if self._is_logged_in():
                 print("  Berhasil menggunakan session cookies yang tersimpan.")
+                self._save_cookies()
                 return True
+            else:
+                print("  [!] Session cookies kedaluwarsa atau tidak valid di portal.")
         except Exception as e:
             print(f"  [!] Gagal memuat session cookies: {e}")
         return False
@@ -381,8 +471,10 @@ class SIMPKLBot:
     def _is_logged_in(self) -> bool:
         """Check if currently logged into SIMPKL."""
         try:
-            current = self.driver.current_url
-            return "/siswa" in current and "/login" not in current
+            current = self.driver.current_url.lower()
+            if "/auth" in current or "/login" in current:
+                return False
+            return "/siswa" in current
         except Exception:
             return False
 

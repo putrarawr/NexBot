@@ -56,7 +56,7 @@ CANDIDATE_HISTORIES = [
     os.getenv("SIMPKL_HISTORY_FILE", "").strip(),
     os.path.abspath(os.path.join(BASE_DIR, "../../../../data/simpkl_history.json")),
     os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_history.json")),
-    os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_history.json")),
+    "/app/data/simpkl_history.json",
     os.path.join(BASE_DIR, "history.json"),
     os.path.expanduser("~/Project-Coding/tools-scraping-jurnal/history.json"),
     "/home/putra/Project-Coding/tools-scraping-jurnal/history.json",
@@ -84,13 +84,13 @@ def save_history(date_str, catatan):
     }
     targets = set([HISTORY_FILE, os.path.join(BASE_DIR, "history.json")])
     for cand in CANDIDATE_HISTORIES:
-        if os.path.exists(cand) or os.path.basename(cand) in ["simpkl_history.json", "history.json"]:
+        if os.path.exists(cand) or (os.path.exists(os.path.dirname(cand)) and os.path.basename(cand) in ["simpkl_history.json", "history.json"]):
             targets.add(cand)
     for tgt in targets:
         try:
-            os.makedirs(os.path.dirname(tgt), exist_ok=True)
-            with open(tgt, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            if os.path.exists(os.path.dirname(tgt)):
+                with open(tgt, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception:
             pass
 
@@ -128,6 +128,7 @@ def get_config():
     return {
         "username": username,
         "password": password,
+        "cookie": os.getenv("SIMPKL_COOKIE", "").strip() or None,
         "github_token": os.getenv("GITHUB_TOKEN", "").strip() or None,
         "repos": [r.strip() for r in os.getenv("GITHUB_REPOS", "putrarawr/cafe-pos").split(",") if r.strip()],
         "authors": authors,
@@ -220,7 +221,7 @@ def action_submit(date_str, catatan):
             return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
 
         # Headless mode for server / background execution
-        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
+        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True, cookie=cfg.get("cookie"))
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
             err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
@@ -321,7 +322,7 @@ def action_batch_submit(entries):
         except ImportError as e:
             return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
 
-        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
+        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True, cookie=cfg.get("cookie"))
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
             err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
@@ -383,7 +384,7 @@ def action_sync():
         except ImportError as e:
             return {"status": "error", "message": f"Modul browser otomatisasi SIMPKL belum terpasang: {str(e)}"}
 
-        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True)
+        bot = SIMPKLBot(chrome_binary=cfg["chrome_binary"], headless=True, cookie=cfg.get("cookie"))
         logged_in = bot.login(cfg["username"], cfg["password"])
         if not logged_in:
             err_msg = getattr(bot, "last_error", "") or "Gagal login ke SIMPKL. Periksa NISN atau password"
@@ -420,6 +421,7 @@ def main():
     parser.add_argument("--count", type=int, default=5, help="Jumlah hari untuk batch fetch")
     parser.add_argument("--username", help="SIMPKL username / NISN")
     parser.add_argument("--password", help="SIMPKL password")
+    parser.add_argument("--cookie", help="SIMPKL session cookie (ci_session value)")
 
     args = parser.parse_args()
 
@@ -427,6 +429,8 @@ def main():
         os.environ["SIMPKL_USERNAME"] = args.username.strip()
     if args.password:
         os.environ["SIMPKL_PASSWORD"] = args.password.strip()
+    if args.cookie:
+        os.environ["SIMPKL_COOKIE"] = args.cookie.strip()
 
     if args.action == "fetch":
         if not args.date:
