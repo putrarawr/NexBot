@@ -181,10 +181,65 @@ export function getMondayOfDate(dateInput = null) {
 }
 
 /**
+ * Get SIMPKL credentials from env or config files
+ */
+export function getSimpklCredentials() {
+  let username = (process.env.SIMPKL_USERNAME || '').trim();
+  let password = (process.env.SIMPKL_PASSWORD || '').trim();
+
+  if (!username || !password) {
+    const authFiles = [
+      path.resolve(process.cwd(), 'data/simpkl_auth.json'),
+      path.resolve(process.cwd(), 'data/config.json'),
+    ];
+    for (const af of authFiles) {
+      if (fs.existsSync(af)) {
+        try {
+          const raw = fs.readFileSync(af, 'utf-8');
+          const data = JSON.parse(raw);
+          if (!username) username = (data.simpklUsername || data.username || '').trim();
+          if (!password) password = (data.simpklPassword || data.password || '').trim();
+          if (username && password) break;
+        } catch {}
+      }
+    }
+  }
+
+  return { username, password };
+}
+
+/**
+ * Save SIMPKL credentials to data/simpkl_auth.json and data/config.json
+ */
+export function saveSimpklCredentials(username, password) {
+  const u = (username || '').trim();
+  const p = (password || '').trim();
+  process.env.SIMPKL_USERNAME = u;
+  process.env.SIMPKL_PASSWORD = p;
+
+  try {
+    const authFile = path.resolve(process.cwd(), 'data/simpkl_auth.json');
+    fs.mkdirSync(path.dirname(authFile), { recursive: true });
+    fs.writeFileSync(authFile, JSON.stringify({ username: u, password: p }, null, 2), 'utf-8');
+  } catch {}
+
+  try {
+    const cfgFile = path.resolve(process.cwd(), 'data/config.json');
+    if (fs.existsSync(cfgFile)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf-8'));
+      cfg.simpklUsername = u;
+      cfg.simpklPassword = p;
+      fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2), 'utf-8');
+    }
+  } catch {}
+}
+
+/**
  * Execute simpkl_runner.py and parse JSON output
  */
 export async function runSimpklRunner(action, params = {}) {
   const config = resolveSimpklConfig();
+  const creds = getSimpklCredentials();
 
   const args = [config.runnerScript, '--action', action];
   if (params.date) args.push('--date', params.date);
@@ -192,12 +247,20 @@ export async function runSimpklRunner(action, params = {}) {
   if (params.entries) args.push('--entries', params.entries);
   if (params.limit) args.push('--limit', String(params.limit));
   if (params.count) args.push('--count', String(params.count));
+  if (creds.username) args.push('--username', creds.username);
+  if (creds.password) args.push('--password', creds.password);
+
+  const runnerEnv = {
+    ...process.env,
+    SIMPKL_USERNAME: creds.username || process.env.SIMPKL_USERNAME || '',
+    SIMPKL_PASSWORD: creds.password || process.env.SIMPKL_PASSWORD || '',
+  };
 
   return new Promise((resolve, reject) => {
     execFile(
       config.pythonBin,
       args,
-      { cwd: config.dir, timeout: 180000 },
+      { cwd: config.dir, env: runnerEnv, timeout: 180000 },
       (error, stdout, stderr) => {
         if (error) {
           const errMsg = stderr?.trim() || error.message;
@@ -1890,6 +1953,45 @@ export function registerSimpklCommands() {
         } catch (err) {
           return await ctx.reply(`[!] Gagal sinkronisasi dengan portal SIMPKL: ${err.message}`);
         }
+      }
+
+      // /simpkl auth [username] [password] atau /simpkl login [username] [password]
+      if (sub === 'auth' || sub === 'login') {
+        const usernameArg = args[1];
+        const passwordArg = args.slice(2).join(' ').trim();
+
+        if (usernameArg && passwordArg) {
+          saveSimpklCredentials(usernameArg, passwordArg);
+          return await ctx.reply(
+            `<b>[ AUTENTIKASI SIMPKL DISIMPAN ]</b>\n\n` +
+            `Akun SIMPKL berhasil diperbarui:\n` +
+            `• Username / NISN: <code>${escapeHtml(usernameArg)}</code>\n` +
+            `• Password: <code>${'*'.repeat(passwordArg.length)}</code>\n\n` +
+            `Kredensial telah disimpan dan siap digunakan untuk pengisian otomatis.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        const creds = getSimpklCredentials();
+        let text = `<b>[ STATUS AUTENTIKASI SIMPKL ]</b>\n\n`;
+        if (creds.username && creds.password) {
+          text += `• Status: <b>Terkonfigurasi Aktif</b>\n`;
+          text += `• Username: <code>${escapeHtml(creds.username)}</code>\n`;
+          text += `• Password: <code>${'*'.repeat(creds.password.length)}</code>\n\n`;
+          text += `Untuk memperbarui, kirim perintah:\n<code>/simpkl auth &lt;username&gt; &lt;password&gt;</code>`;
+        } else {
+          text += `• Status: <b>Belum Lengkap</b>\n\n`;
+          text += `Silakan daftarkan akun SIMPKL kamu dengan mengetik:\n`;
+          text += `<code>/simpkl auth &lt;username/nisn&gt; &lt;password&gt;</code>`;
+        }
+
+        const keyboard = new InlineKeyboard()
+          .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
+        return await ctx.reply(text, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard,
+        });
       }
 
       // Default: Buka Menu Utama SIMPKL

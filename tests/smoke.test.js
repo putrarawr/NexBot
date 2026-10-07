@@ -55,6 +55,7 @@ import {
   VARY_PACKAGES,
   getSimpklWorkweekTracking,
   setSimpklLastSubmittedDate,
+  getSimpklCredentials,
   pendingSimpklPrompts,
   handleSimpklMessageInterceptor,
 } from '../src/modules/simpkl/index.js';
@@ -973,6 +974,12 @@ async function runAllTests() {
     const refreshed = setSimpklLastSubmittedDate('2026-09-25');
     assert.equal(refreshed.lastSubmittedDate, '2026-09-25');
     assert.equal(refreshed.totalWeeksBehind, 2);
+  });
+
+  await test('getSimpklCredentials resolves username and password from config fallback', () => {
+    const creds = getSimpklCredentials();
+    assert.ok(creds.username.length > 0, 'Username must be resolved');
+    assert.ok(creds.password.length > 0, 'Password must be resolved');
   });
 
   await test('handleSimpklMessageInterceptor intercepts 1-sentence reply and applies to 4 days', async () => {

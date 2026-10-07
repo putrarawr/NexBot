@@ -96,9 +96,34 @@ def save_history(date_str, catatan):
 def get_config():
     authors_raw = os.getenv("GITHUB_AUTHORS", "putrarawr,WisWho,Paissaiueo,broiosme,Fais Adhyasta Pratama").strip()
     authors = [a.strip() for a in authors_raw.split(",") if a.strip()]
+
+    username = os.getenv("SIMPKL_USERNAME", "").strip()
+    password = os.getenv("SIMPKL_PASSWORD", "").strip()
+
+    if not username or not password:
+        candidate_configs = [
+            os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_auth.json")),
+            os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_auth.json")),
+            os.path.abspath(os.path.join(BASE_DIR, "../../../data/config.json")),
+            os.path.abspath(os.path.join(BASE_DIR, "../../data/config.json")),
+        ]
+        for cpath in candidate_configs:
+            if os.path.exists(cpath):
+                try:
+                    with open(cpath, "r", encoding="utf-8") as f:
+                        cdata = json.load(f)
+                        if not username:
+                            username = (cdata.get("simpklUsername") or cdata.get("username") or "").strip()
+                        if not password:
+                            password = (cdata.get("simpklPassword") or cdata.get("password") or "").strip()
+                        if username and password:
+                            break
+                except Exception:
+                    pass
+
     return {
-        "username": os.getenv("SIMPKL_USERNAME", "").strip(),
-        "password": os.getenv("SIMPKL_PASSWORD", "").strip(),
+        "username": username,
+        "password": password,
         "github_token": os.getenv("GITHUB_TOKEN", "").strip() or None,
         "repos": [r.strip() for r in os.getenv("GITHUB_REPOS", "putrarawr/cafe-pos").split(",") if r.strip()],
         "authors": authors,
@@ -381,8 +406,15 @@ def main():
     parser.add_argument("--entries", help="JSON array entri untuk batch submit")
     parser.add_argument("--limit", type=int, default=10, help="Limit history")
     parser.add_argument("--count", type=int, default=5, help="Jumlah hari untuk batch fetch")
+    parser.add_argument("--username", help="SIMPKL username / NISN")
+    parser.add_argument("--password", help="SIMPKL password")
 
     args = parser.parse_args()
+
+    if args.username:
+        os.environ["SIMPKL_USERNAME"] = args.username.strip()
+    if args.password:
+        os.environ["SIMPKL_PASSWORD"] = args.password.strip()
 
     if args.action == "fetch":
         if not args.date:
