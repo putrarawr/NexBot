@@ -58,14 +58,34 @@ class SIMPKLBot:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1280,900")
 
+        if not chrome_binary:
+            chrome_binary = os.environ.get("CHROME_BINARY")
+
         if chrome_binary and os.path.exists(chrome_binary):
             options.binary_location = chrome_binary
 
         chrome_ver = self._detect_chrome_version(chrome_binary)
         print(f"  Chrome versi terdeteksi: {chrome_ver or 'auto'}")
 
+        driver_candidates = [
+            os.environ.get("CHROMEDRIVER_PATH", ""),
+            "/usr/bin/chromedriver",
+            "/usr/lib/chromium/chromedriver",
+            "/usr/local/bin/chromedriver",
+        ]
+        driver_bin = next((d for d in driver_candidates if d and os.path.exists(d)), None)
+        if driver_bin:
+            print(f"  ChromeDriver terdeteksi di: {driver_bin}")
+
         try:
-            self.driver = uc.Chrome(options=options, version_main=chrome_ver)
+            if driver_bin:
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=chrome_ver,
+                    driver_executable_path=driver_bin,
+                )
+            else:
+                self.driver = uc.Chrome(options=options, version_main=chrome_ver)
         except Exception as uc_err:
             print(f"  uc.Chrome error ({uc_err}), fallback ke standard selenium webdriver...")
             from selenium import webdriver
@@ -78,20 +98,32 @@ class SIMPKLBot:
             std_options.add_argument("--no-sandbox")
             std_options.add_argument("--disable-dev-shm-usage")
             std_options.add_argument("--window-size=1280,900")
+            std_options.add_argument("--disable-blink-features=AutomationControlled")
+            std_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            std_options.add_experimental_option("useAutomationExtension", False)
+
             if chrome_binary and os.path.exists(chrome_binary):
                 std_options.binary_location = chrome_binary
 
-            driver_candidates = [
-                "/usr/bin/chromedriver",
-                "/usr/lib/chromium/chromedriver",
-                "/usr/local/bin/chromedriver",
-            ]
-            driver_bin = next((d for d in driver_candidates if os.path.exists(d)), None)
             if driver_bin:
                 service = Service(executable_path=driver_bin)
                 self.driver = webdriver.Chrome(service=service, options=std_options)
             else:
                 self.driver = webdriver.Chrome(options=std_options)
+
+            try:
+                self.driver.execute_cdp_cmd(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {
+                        "source": """
+                            Object.defineProperty(navigator, 'webdriver', {
+                                get: () => undefined
+                            });
+                        """
+                    },
+                )
+            except Exception:
+                pass
 
         self.wait = WebDriverWait(self.driver, 30)
 
@@ -103,11 +135,16 @@ class SIMPKLBot:
         if binary:
             candidates.append(binary)
         candidates.extend([
-            "google-chrome",
-            "google-chrome-stable",
+            os.environ.get("CHROME_BINARY", ""),
             "chromium",
             "chromium-browser",
+            "google-chrome",
+            "google-chrome-stable",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
         ])
+        candidates = [c for c in candidates if c]
         for cmd in candidates:
             try:
                 out = subprocess.check_output(

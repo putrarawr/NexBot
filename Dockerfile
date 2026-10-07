@@ -1,10 +1,27 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-# Install system dependencies including chromium, python3, pip, ffmpeg, and fonts
-RUN apk add --no-cache git ffmpeg python3 py3-pip chromium chromium-chromedriver fontconfig ttf-dejavu font-noto font-noto-cjk xvfb xvfb-run \
-  && python3 -m pip install --no-cache-dir --break-system-packages --upgrade yt-dlp python-dotenv requests selenium undetected-chromedriver pyvirtualdisplay
+# Install system dependencies including chromium, python3, pip, ffmpeg, xvfb, and fonts
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    python3 \
+    python3-pip \
+    chromium \
+    chromium-driver \
+    xvfb \
+    fonts-noto-cjk \
+    fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip3 install --no-cache-dir --break-system-packages --upgrade \
+    yt-dlp \
+    python-dotenv \
+    requests \
+    selenium \
+    undetected-chromedriver \
+    pyvirtualdisplay
 
-ENV CHROME_BINARY=/usr/bin/chromium-browser
+ENV CHROME_BINARY=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV SIMPKL_USERNAME=0081361735
 ENV SIMPKL_PASSWORD=rexx12345rawr
 
