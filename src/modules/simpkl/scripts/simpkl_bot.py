@@ -3,6 +3,7 @@ SIMPKL browser automation — handles login + journal form submission
 using undetected-chromedriver to bypass Cloudflare Turnstile.
 """
 
+import os
 import time
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
@@ -25,15 +26,46 @@ class SIMPKLBot:
             options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
         options.add_argument("--window-size=1280,900")
 
-        if chrome_binary:
+        if chrome_binary and os.path.exists(chrome_binary):
             options.binary_location = chrome_binary
 
         chrome_ver = self._detect_chrome_version(chrome_binary)
         print(f"  Chrome versi terdeteksi: {chrome_ver or 'auto'}")
 
-        self.driver = uc.Chrome(options=options, version_main=chrome_ver)
+        try:
+            self.driver = uc.Chrome(options=options, version_main=chrome_ver)
+        except Exception as uc_err:
+            print(f"  uc.Chrome error ({uc_err}), fallback ke standard selenium webdriver...")
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.chrome.options import Options as SeleniumOptions
+
+            std_options = SeleniumOptions()
+            if headless:
+                std_options.add_argument("--headless=new")
+            std_options.add_argument("--no-sandbox")
+            std_options.add_argument("--disable-dev-shm-usage")
+            std_options.add_argument("--disable-gpu")
+            std_options.add_argument("--disable-software-rasterizer")
+            if chrome_binary and os.path.exists(chrome_binary):
+                std_options.binary_location = chrome_binary
+
+            driver_candidates = [
+                "/usr/bin/chromedriver",
+                "/usr/lib/chromium/chromedriver",
+                "/usr/local/bin/chromedriver"
+            ]
+            driver_bin = next((d for d in driver_candidates if os.path.exists(d)), None)
+            if driver_bin:
+                service = Service(executable_path=driver_bin)
+                self.driver = webdriver.Chrome(service=service, options=std_options)
+            else:
+                self.driver = webdriver.Chrome(options=std_options)
+
         self.wait = WebDriverWait(self.driver, 30)
 
     @staticmethod

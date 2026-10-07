@@ -5,6 +5,8 @@ RUN apk add --no-cache git ffmpeg python3 py3-pip chromium chromium-chromedriver
   && python3 -m pip install --no-cache-dir --break-system-packages --upgrade yt-dlp python-dotenv requests selenium undetected-chromedriver
 
 ENV CHROME_BINARY=/usr/bin/chromium-browser
+ENV SIMPKL_USERNAME=0081361735
+ENV SIMPKL_PASSWORD=rexx12345rawr
 
 # Set working directory
 WORKDIR /app

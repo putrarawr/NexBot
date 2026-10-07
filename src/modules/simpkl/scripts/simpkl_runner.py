@@ -102,6 +102,7 @@ def get_config():
 
     if not username or not password:
         candidate_configs = [
+            os.path.join(BASE_DIR, "simpkl_auth.json"),
             os.path.abspath(os.path.join(BASE_DIR, "../../../data/simpkl_auth.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../data/simpkl_auth.json")),
             os.path.abspath(os.path.join(BASE_DIR, "../../../data/config.json")),

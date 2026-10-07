@@ -188,9 +188,13 @@ export function getSimpklCredentials() {
   let password = (process.env.SIMPKL_PASSWORD || '').trim();
 
   if (!username || !password) {
+    const fileDir = path.dirname(fileURLToPath(import.meta.url));
     const authFiles = [
       path.resolve(process.cwd(), 'data/simpkl_auth.json'),
       path.resolve(process.cwd(), 'data/config.json'),
+      path.resolve(fileDir, 'scripts/simpkl_auth.json'),
+      path.resolve(fileDir, '../../data/simpkl_auth.json'),
+      path.resolve(fileDir, '../../data/config.json'),
     ];
     for (const af of authFiles) {
       if (fs.existsSync(af)) {
@@ -217,11 +221,17 @@ export function saveSimpklCredentials(username, password) {
   process.env.SIMPKL_USERNAME = u;
   process.env.SIMPKL_PASSWORD = p;
 
-  try {
-    const authFile = path.resolve(process.cwd(), 'data/simpkl_auth.json');
-    fs.mkdirSync(path.dirname(authFile), { recursive: true });
-    fs.writeFileSync(authFile, JSON.stringify({ username: u, password: p }, null, 2), 'utf-8');
-  } catch {}
+  const fileDir = path.dirname(fileURLToPath(import.meta.url));
+  const targets = [
+    path.resolve(process.cwd(), 'data/simpkl_auth.json'),
+    path.resolve(fileDir, 'scripts/simpkl_auth.json'),
+  ];
+  for (const t of targets) {
+    try {
+      fs.mkdirSync(path.dirname(t), { recursive: true });
+      fs.writeFileSync(t, JSON.stringify({ username: u, password: p }, null, 2), 'utf-8');
+    } catch {}
+  }
 
   try {
     const cfgFile = path.resolve(process.cwd(), 'data/config.json');
