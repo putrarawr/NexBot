@@ -1759,12 +1759,12 @@ export async function handleSimpklCallback(ctx, data) {
 export function registerSimpklCommands() {
   registerCommand({
     name: 'simpkl',
-    aliases: ['jurnal', 'pkl', 'prakerin'],
+    aliases: ['jurnal', 'pkl', 'prakerin', 'cookie', 'cookies'],
     category: 'tools',
     description: 'Auto-filler jurnal SIMPKL dari commit GitHub dengan Date Picker interaktif',
-    usage: '/simpkl [cal | 5days [tgl] | loop <teks> | beda [A|B|C] | today | date YYYY-MM-DD | history | set ... | fill ...]',
+    usage: '/simpkl [cal | 5days [tgl] | loop <teks> | beda [A|B|C] | today | date YYYY-MM-DD | history | set ... | fill ... | cookie <token>]',
     platforms: ['telegram'],
-    async execute({ ctx, reply, args }) {
+    async execute({ ctx, reply, args, command }) {
       if (!ctx?.reply) {
         return reply('Perintah ini dikhususkan untuk Telegram dengan tombol interaktif.');
       }
@@ -2070,24 +2070,50 @@ export function registerSimpklCommands() {
         });
       }
 
-      // /simpkl cookie [ci_session_value]
-      if (sub === 'cookie' || sub === 'session') {
-        const cookieVal = args[1]?.trim();
+      // /simpkl cookie [ci_session_value], /simpkl cookies [value], /cookie [value], /cookies [value]
+      const isCookieCmd = command === 'cookie' || command === 'cookies';
+      const isCookieSub = sub === 'cookie' || sub === 'cookies' || sub === 'session' || sub === 'sessions' || sub === 'ci_session';
+      const isDirectCookieHash = /^[a-f0-9]{32,64}$/i.test(sub);
+
+      if (isCookieCmd || isCookieSub || isDirectCookieHash) {
+        let cookieVal = '';
+        if (isDirectCookieHash) {
+          cookieVal = sub;
+        } else if (isCookieCmd) {
+          cookieVal = args[0]?.trim() || args[1]?.trim();
+        } else {
+          cookieVal = args[1]?.trim() || args[2]?.trim();
+        }
+
         if (cookieVal) {
           saveSimpklSessionCookie(cookieVal);
+          const tracking = getSimpklWorkweekTracking();
+          const keyboard = new InlineKeyboard();
+          if (tracking.totalWeeksBehind > 0) {
+            keyboard.text('[ Lanjut Submit Urut ]', 'simpkl_submit_flow:auto').row();
+          }
+          keyboard
+            .text('[ Date Picker ]', 'simpkl_cal_open')
+            .text('[ Menu SIMPKL ]', 'simpkl_menu');
+
           return await ctx.reply(
             `<b>[ SESSION COOKIE DISIMPAN ]</b>\n\n` +
             `Cookie sesi <code>ci_session</code> berhasil disimpan.\n` +
-            `Bot sekarang dapat membuka portal SIMPKL secara instan menggunakan sesi aktif ini tanpa hambatan challenge Turnstile.`,
-            { parse_mode: 'HTML' }
+            `Bot sekarang dapat membuka portal SIMPKL secara instan menggunakan sesi aktif ini tanpa hambatan challenge Turnstile.\n\n` +
+            `Status Antrean: <b>${escapeHtml(tracking.targetWeek?.label || 'Siap')}</b> (${tracking.totalWeeksBehind} Minggu Tertinggal)\n\n` +
+            `Silakan tekan tombol di bawah untuk langsung mengirim jurnal:`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: keyboard,
+            }
           );
         }
 
         return await ctx.reply(
           `<b>[ CARA INPUT COOKIE SIMPKL ]</b>\n\n` +
-          `Jika Turnstile pada server terhambat verifikasi bot, kamu bisa memasukkan cookie sesi langsung:\n\n` +
-          `Format:\n<code>/simpkl cookie &lt;nilai_ci_session&gt;</code>\n\n` +
-          `Nilai <i>ci_session</i> dapat dilihat di browser setelah login pada menu Inspect &gt; Application &gt; Cookies &gt; pkl.smk1bws.sch.id.`,
+          `Format:\n<code>/simpkl cookie &lt;nilai_ci_session&gt;</code>\n` +
+          `Atau:\n<code>/cookies &lt;nilai_ci_session&gt;</code>\n\n` +
+          `Nilai <i>ci_session</i> dapat dilihat di browser setelah login pada menu Inspect &gt; Application/Storage &gt; Cookies &gt; pkl.smk1bws.sch.id.`,
           { parse_mode: 'HTML' }
         );
       }
