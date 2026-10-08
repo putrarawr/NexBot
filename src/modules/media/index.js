@@ -4,6 +4,7 @@ import { logger } from '../../utils/logger.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import sharp from 'sharp';
 import {
@@ -714,8 +715,6 @@ export function registerMediaCommands() {
         return reply(`[!] Masukkan kata-kata untuk stiker Brat.\nContoh: <code>${prefix}brat kamu nanya</code>\natau balas pesan seseorang dengan <code>${prefix}brat</code>.`);
       }
 
-      if (typeof react === 'function') await react('👍');
-
       try {
         const bratWebp = await generateBratSticker(text);
         await sock.sendMessage(jid, {
@@ -729,60 +728,244 @@ export function registerMediaCommands() {
   });
 }
 
-export async function generateBratSticker(text) {
-  const width = 512;
-  const height = 512;
-  const cleanRaw = String(text || '').trim();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-  const inputLines = cleanRaw.split(/\r?\n/).flatMap((line) => {
-    const words = line.trim().split(/\s+/);
-    const wrapped = [];
-    let cur = '';
-    for (const w of words) {
-      if ((cur + ' ' + w).trim().length <= 15) {
-        cur = (cur + ' ' + w).trim();
-      } else {
-        if (cur) wrapped.push(cur);
-        cur = w;
+function parseTtfAdvanceWidths(fontBuffer) {
+  try {
+    const numTables = fontBuffer.readUInt16BE(4);
+    const tables = {};
+    for (let i = 0; i < numTables; i++) {
+      const offset = 12 + i * 16;
+      const tag = fontBuffer.toString('ascii', offset, offset + 4);
+      tables[tag] = {
+        offset: fontBuffer.readUInt32BE(offset + 8),
+        length: fontBuffer.readUInt32BE(offset + 12),
+      };
+    }
+
+    if (!tables.head || !tables.hhea || !tables.cmap || !tables.hmtx) {
+      return null;
+    }
+
+    const headOffset = tables.head.offset;
+    const unitsPerEm = fontBuffer.readUInt16BE(headOffset + 18);
+
+    const hheaOffset = tables.hhea.offset;
+    const numberOfHMetrics = fontBuffer.readUInt16BE(hheaOffset + 34);
+
+    const cmapOffset = tables.cmap.offset;
+    const numSubtables = fontBuffer.readUInt16BE(cmapOffset + 2);
+    let subtableOffset = 0;
+    for (let i = 0; i < numSubtables; i++) {
+      const platformId = fontBuffer.readUInt16BE(cmapOffset + 4 + i * 8);
+      const encodingId = fontBuffer.readUInt16BE(cmapOffset + 6 + i * 8);
+      const offset = fontBuffer.readUInt32BE(cmapOffset + 8 + i * 8);
+      if (platformId === 0 || (platformId === 3 && encodingId === 1)) {
+        subtableOffset = cmapOffset + offset;
+        break;
       }
     }
-    if (cur) wrapped.push(cur);
-    return wrapped;
-  }).filter(Boolean);
 
-  const lines = inputLines.slice(0, 8);
-  if (lines.length === 0) lines.push('brat');
+    if (!subtableOffset) return null;
 
-  let fontSize = 48;
-  if (lines.length === 1) fontSize = 56;
-  else if (lines.length === 2) fontSize = 50;
-  else if (lines.length <= 4) fontSize = 42;
-  else if (lines.length <= 6) fontSize = 34;
-  else fontSize = 28;
+    const format = fontBuffer.readUInt16BE(subtableOffset);
+    const charToGlyph = {};
+    if (format === 4) {
+      const segCountX2 = fontBuffer.readUInt16BE(subtableOffset + 6);
+      const segCount = segCountX2 / 2;
+      const endCodeOffset = subtableOffset + 14;
+      const startCodeOffset = endCodeOffset + segCountX2 + 2;
+      const idDeltaOffset = startCodeOffset + segCountX2;
+      const idRangeOffsetOffset = idDeltaOffset + segCountX2;
 
-  const maxWordLen = Math.max(...lines.map((l) => l.length));
-  if (maxWordLen > 10) {
-    const estimatedWidth = maxWordLen * (fontSize * 0.58);
-    if (estimatedWidth > 440) {
-      fontSize = Math.floor(440 / (maxWordLen * 0.58));
+      for (let i = 0; i < segCount; i++) {
+        const endCode = fontBuffer.readUInt16BE(endCodeOffset + i * 2);
+        const startCode = fontBuffer.readUInt16BE(startCodeOffset + i * 2);
+        const idDelta = fontBuffer.readInt16BE(idDeltaOffset + i * 2);
+        const idRangeOffset = fontBuffer.readUInt16BE(idRangeOffsetOffset + i * 2);
+
+        for (let c = startCode; c <= endCode; c++) {
+          if (c === 0xFFFF) break;
+          let glyphId = 0;
+          if (idRangeOffset === 0) {
+            glyphId = (c + idDelta) & 0xFFFF;
+          } else {
+            const glyphIndexOffset = idRangeOffsetOffset + i * 2 + idRangeOffset + (c - startCode) * 2;
+            glyphId = fontBuffer.readUInt16BE(glyphIndexOffset);
+            if (glyphId !== 0) glyphId = (glyphId + idDelta) & 0xFFFF;
+          }
+          charToGlyph[String.fromCharCode(c)] = glyphId;
+        }
+      }
     }
+
+    const hmtxOffset = tables.hmtx.offset;
+    const glyphWidths = [];
+    for (let i = 0; i < numberOfHMetrics; i++) {
+      glyphWidths.push(fontBuffer.readUInt16BE(hmtxOffset + i * 4));
+    }
+
+    return function measure(str, fontSize) {
+      let totalUnits = 0;
+      for (const char of str) {
+        const gid = charToGlyph[char] || 0;
+        const adv = (gid < numberOfHMetrics) ? glyphWidths[gid] : glyphWidths[numberOfHMetrics - 1];
+        totalUnits += adv;
+      }
+      return (totalUnits / unitsPerEm) * fontSize;
+    };
+  } catch {
+    return null;
+  }
+}
+
+let cachedMeasure = null;
+function getFontMeasure() {
+  if (cachedMeasure) return cachedMeasure;
+  try {
+    const fontPath = path.resolve(__dirname, '../../assets/fonts/ArialNarrow.ttf');
+    if (fs.existsSync(fontPath)) {
+      const buf = fs.readFileSync(fontPath);
+      cachedMeasure = parseTtfAdvanceWidths(buf);
+    }
+  } catch {}
+
+  if (!cachedMeasure) {
+    cachedMeasure = (str, fontSize) => str.length * (fontSize * 0.45);
+  }
+  return cachedMeasure;
+}
+
+function ensureSystemFontInstalled() {
+  try {
+    const userFontDir = path.join(os.homedir(), '.local', 'share', 'fonts');
+    const targetFont = path.join(userFontDir, 'ArialNarrow.ttf');
+    const sourceFont = path.resolve(__dirname, '../../assets/fonts/ArialNarrow.ttf');
+    if (fs.existsSync(sourceFont) && !fs.existsSync(targetFont)) {
+      fs.mkdirSync(userFontDir, { recursive: true });
+      fs.copyFileSync(sourceFont, targetFont);
+      try {
+        execSync(`fc-cache -f "${userFontDir}"`, { stdio: 'ignore', timeout: 5000 });
+      } catch {}
+    }
+  } catch {}
+}
+
+export async function generateBratSticker(text) {
+  ensureSystemFontInstalled();
+  const measure = getFontMeasure();
+
+  let raw = String(text || '').trim();
+  let bg = '#ffffff';
+  let textColor = '#000000';
+
+  if (/-green\b/i.test(raw)) {
+    bg = '#8ace00';
+    raw = raw.replace(/-green\b/gi, '').trim();
+  } else if (/-black\b/i.test(raw)) {
+    bg = '#000000';
+    textColor = '#ffffff';
+    raw = raw.replace(/-black\b/gi, '').trim();
+  } else if (/-white\b/i.test(raw)) {
+    bg = '#ffffff';
+    raw = raw.replace(/-white\b/gi, '').trim();
   }
 
-  const lineHeight = fontSize * 1.28;
-  const totalHeight = lines.length * lineHeight;
-  const startY = (height - totalHeight) / 2 + fontSize * 0.9;
+  const cleanText = raw.toLowerCase().trim() || 'brat';
+  const canvasSize = 512;
+  const contentWidth = 370;
+  const maxHeight = 430;
+  const startX = (canvasSize - contentWidth) / 2;
+
+  const paragraphs = cleanText.split(/\r?\n/).map((p) => p.trim()).filter(Boolean);
+  const words = cleanText.split(/\s+/).filter(Boolean);
+
+  let layout;
+  if (words.length <= 1) {
+    let fs = 125;
+    while (fs > 30 && measure(words[0] || 'brat', fs) > contentWidth) {
+      fs -= 2;
+    }
+    layout = { fontSize: fs, lines: [words] };
+  } else {
+    let best = null;
+    for (let fs = 74; fs >= 22; fs -= 2) {
+      const lines = [];
+      let overflow = false;
+
+      for (const p of paragraphs) {
+        const pWords = p.split(/\s+/).filter(Boolean);
+        let cur = [];
+        for (const w of pWords) {
+          if (measure(w, fs) > contentWidth) {
+            overflow = true;
+            break;
+          }
+          const testLine = [...cur, w].join(' ');
+          if (cur.length > 0 && measure(testLine, fs) > contentWidth) {
+            lines.push(cur);
+            cur = [w];
+          } else {
+            cur.push(w);
+          }
+        }
+        if (overflow) break;
+        if (cur.length > 0) lines.push(cur);
+      }
+
+      if (overflow) continue;
+
+      const lineHeight = fs * 0.98;
+      const totalHeight = lines.length * lineHeight;
+      if (totalHeight > maxHeight) continue;
+
+      const singleWordLines = lines.filter((l) => l.length === 1).length;
+      const score = fs * 10 - (singleWordLines * 45) - (lines.length * 5);
+
+      if (!best || score > best.score) {
+        best = { fontSize: fs, lines, score };
+      }
+    }
+
+    layout = best || { fontSize: 32, lines: [words] };
+  }
+
+  const { fontSize, lines } = layout;
+  const lineHeight = fontSize * 0.98;
+  const totalBlockHeight = lines.length * lineHeight;
+  const startY = (canvasSize - totalBlockHeight) / 2 + (fontSize * 0.82);
 
   const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const textNodes = lines.map((line, idx) => {
-    const y = startY + (idx * lineHeight);
-    return `<text x="50%" y="${y}" text-anchor="middle" fill="#000000" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="${fontSize}px" letter-spacing="-0.02em">${escapeXml(line)}</text>`;
-  }).join('\n');
+  const textElements = [];
+
+  lines.forEach((lineWords, lineIdx) => {
+    const y = startY + (lineIdx * lineHeight);
+    if (lineWords.length === 1) {
+      textElements.push(`<text x="${canvasSize / 2}" y="${y.toFixed(2)}" text-anchor="middle" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fontSize}px" fill="${textColor}" filter="url(#bratBlur)">${escapeXml(lineWords[0])}</text>`);
+    } else {
+      const wordWidths = lineWords.map((w) => measure(w, fontSize));
+      const totalWordW = wordWidths.reduce((a, b) => a + b, 0);
+      const totalGap = contentWidth - totalWordW;
+      const gap = totalGap > 0 ? (totalGap / (lineWords.length - 1)) : measure(' ', fontSize);
+
+      let curX = startX;
+      lineWords.forEach((w, wIdx) => {
+        textElements.push(`<text x="${curX.toFixed(2)}" y="${y.toFixed(2)}" text-anchor="start" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fontSize}px" fill="${textColor}" filter="url(#bratBlur)">${escapeXml(w)}</text>`);
+        curX += wordWidths[wIdx] + gap;
+      });
+    }
+  });
 
   const svg = `
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100%" height="100%" fill="#ffffff" rx="28" />
-      ${textNodes}
+    <svg width="${canvasSize}" height="${canvasSize}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="bratBlur" x="-10%" y="-10%" width="120%" height="120%">
+          <feGaussianBlur stdDeviation="0.9" />
+        </filter>
+      </defs>
+      <rect width="100%" height="100%" fill="${bg}" />
+      ${textElements.join('\n      ')}
     </svg>
   `;
 

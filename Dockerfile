@@ -34,6 +34,11 @@ RUN npm install --omit=dev
 # Copy application code
 COPY . .
 
+# Register custom application fonts
+RUN mkdir -p /usr/local/share/fonts/truetype \
+  && cp src/assets/fonts/*.ttf /usr/local/share/fonts/truetype/ 2>/dev/null || true \
+  && fc-cache -f /usr/local/share/fonts 2>/dev/null || true
+
 # Expose ports
 EXPOSE 8080 3000
 

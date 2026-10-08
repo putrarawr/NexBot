@@ -333,6 +333,14 @@ async function runAllTests() {
     const bratWebp = await generateBratSticker('kamu nanya');
     assert.ok(bratWebp.length > 50, 'Brat sticker buffer should be valid');
     assert.equal(bratWebp.subarray(8, 12).toString(), 'WEBP');
+
+    const bratDeluxe = await generateBratSticker("brat and it's the same but there's three more songs so it's not");
+    assert.ok(bratDeluxe.length > 50, 'Deluxe Brat sticker buffer should be valid');
+    assert.equal(bratDeluxe.subarray(8, 12).toString(), 'WEBP');
+
+    const bratGreen = await generateBratSticker('kamu nanya -green');
+    assert.ok(bratGreen.length > 50, 'Green Brat sticker buffer should be valid');
+    assert.equal(bratGreen.subarray(8, 12).toString(), 'WEBP');
   });
 
   // 4d. Group Utility & AFK Tests
