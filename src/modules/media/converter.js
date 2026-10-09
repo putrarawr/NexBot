@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
+import webpmux from 'node-webpmux';
 import { logger } from '../../utils/logger.js';
 
 const execAsync = promisify(exec);
@@ -25,8 +26,42 @@ async function safeUnlink(...paths) {
   }
 }
 
+// Menambahkan metadata EXIF (pack dan author) ke stiker WebP
+export async function addStickerExif(webpBuffer, { pack = 'NexusBot', author = 'nexusbot' } = {}) {
+  if (!webpBuffer || webpBuffer.length === 0) return webpBuffer;
+
+  try {
+    const img = new webpmux.Image();
+    await img.load(webpBuffer);
+
+    const json = {
+      'sticker-pack-id': `nexusbot-${Date.now()}`,
+      'sticker-pack-name': String(pack || 'NexusBot').trim(),
+      'sticker-pack-publisher': String(author || 'nexusbot').trim(),
+      'emojis': [],
+    };
+
+    const data = JSON.stringify(json);
+    const exif = Buffer.concat([
+      Buffer.from([
+        0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x16, 0x00, 0x00, 0x00,
+      ]),
+      Buffer.from(data, 'utf-8'),
+    ]);
+    exif.writeUIntLE(Buffer.byteLength(data, 'utf-8'), 14, 4);
+
+    img.exif = exif;
+    return await img.save(null);
+  } catch (err) {
+    logger.error('Gagal menambahkan metadata EXIF ke stiker:', err.message);
+    return webpBuffer;
+  }
+}
+
 // 1. Gambar Statis ke Stiker WebP (512x512 with aspect ratio pad)
-export async function imageToWebpSticker(imageBuffer) {
+export async function imageToWebpSticker(imageBuffer, metadata = { pack: 'NexusBot', author: 'nexusbot' }) {
   const inPath = getTempFilePath('img');
   const outPath = getTempFilePath('webp');
 
@@ -35,7 +70,7 @@ export async function imageToWebpSticker(imageBuffer) {
     const cmd = `ffmpeg -y -i "${inPath}" -vcodec libwebp -filter:v "scale='if(gt(a,1),512,-1)':'if(gt(a,1),-1,512)',pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black@0.0" -lossless 1 "${outPath}"`;
     await execAsync(cmd);
     const webpBuffer = fs.readFileSync(outPath);
-    return webpBuffer;
+    return await addStickerExif(webpBuffer, metadata);
   } catch (err) {
     logger.error('Gagal convert image to sticker:', err.message);
     throw err;
@@ -45,7 +80,7 @@ export async function imageToWebpSticker(imageBuffer) {
 }
 
 // 2. Video / GIF / Live Photo ke Animated WebP Sticker Boomerang Loop (Mulus & Seamless)
-export async function videoToWebpSticker(videoBuffer, isLivePhoto = false) {
+export async function videoToWebpSticker(videoBuffer, isLivePhoto = false, metadata = { pack: 'NexusBot', author: 'nexusbot' }) {
   const inPath = getTempFilePath('mp4');
   const outPath = getTempFilePath('webp');
 
@@ -62,7 +97,7 @@ export async function videoToWebpSticker(videoBuffer, isLivePhoto = false) {
 
     await execAsync(cmd);
     const webpBuffer = fs.readFileSync(outPath);
-    return webpBuffer;
+    return await addStickerExif(webpBuffer, metadata);
   } catch (err) {
     logger.error('Gagal convert video to animated sticker:', err.message);
     throw err;
@@ -182,9 +217,8 @@ export async function generateQuoteSticker(name = 'User', text = '', senderNumbe
 `;
 
   try {
-    // Alpine's FFmpeg build may not include an SVG decoder. Sharp uses
-    // librsvg for the rasterization step, then encodes the final sticker as WebP.
-    return await sharp(Buffer.from(svg)).webp({ lossless: true }).toBuffer();
+    const rawWebp = await sharp(Buffer.from(svg)).webp({ lossless: true }).toBuffer();
+    return await addStickerExif(rawWebp, { pack: 'NexusBot', author: 'nexusbot' });
   } catch (err) {
     logger.error('Gagal generate Quote Sticker:', err.message);
     throw err;

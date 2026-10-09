@@ -13,6 +13,7 @@ import {
   stickerToPng,
   generateQuoteSticker,
   createPhotoLiveMotion,
+  addStickerExif,
 } from './converter.js';
 import {
   enhanceImageHd,
@@ -108,8 +109,8 @@ export function registerMediaCommands() {
     aliases: ['s', 'stiker'],
     category: 'media',
     description: 'Mengubah foto, video, atau GIF menjadi stiker',
-    usage: '/s [kirim foto/video dengan caption /s atau balas media]',
-    async execute({ sock, msg, jid, reply, prefix, ctx, platform, react }) {
+    usage: '/s [kirim foto/video dengan caption /s atau balas media] atau /s <pack>|<author>',
+    async execute({ sock, msg, jid, reply, prefix, ctx, platform, react, fullText }) {
       if (typeof react === 'function') await react('👍');
 
       try {
@@ -166,11 +167,25 @@ export function registerMediaCommands() {
           return reply(`[!] Format salah.\nKirim foto atau video pendek dengan caption <code>${prefix}s</code> atau balas media yang sudah ada.`);
         }
 
+        let pack = 'NexusBot';
+        let author = 'nexusbot';
+
+        const rawMeta = fullText?.trim();
+        if (rawMeta) {
+          if (rawMeta.includes('|')) {
+            const parts = rawMeta.split('|').map((s) => s.trim()).filter(Boolean);
+            if (parts[0]) pack = parts[0];
+            if (parts[1]) author = parts[1];
+          } else {
+            author = rawMeta;
+          }
+        }
+
         let webpSticker;
         if (isVideo) {
-          webpSticker = await videoToWebpSticker(mediaBuffer, false);
+          webpSticker = await videoToWebpSticker(mediaBuffer, false, { pack, author });
         } else {
-          webpSticker = await imageToWebpSticker(mediaBuffer);
+          webpSticker = await imageToWebpSticker(mediaBuffer, { pack, author });
         }
 
         await sock.sendMessage(jid, {
@@ -969,9 +984,10 @@ export async function generateBratSticker(text) {
     </svg>
   `;
 
-  return await sharp(Buffer.from(svg))
+  const rawWebp = await sharp(Buffer.from(svg))
     .webp({ quality: 95 })
     .toBuffer();
+  return await addStickerExif(rawWebp, { pack: 'NexusBot', author: 'nexusbot' });
 }
 
 export async function generateTtsAudio(text, lang = 'id') {

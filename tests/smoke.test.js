@@ -300,6 +300,11 @@ async function runAllTests() {
     assert.ok(webpBuffer.length > 50, 'WebP buffer should be valid');
     assert.equal(webpBuffer.subarray(0, 4).toString(), 'RIFF');
     assert.equal(webpBuffer.subarray(8, 12).toString(), 'WEBP');
+    assert.ok(webpBuffer.includes(Buffer.from('nexusbot')), 'WebP buffer should contain nexusbot EXIF metadata');
+    assert.ok(webpBuffer.includes(Buffer.from('NexusBot')), 'WebP buffer should contain NexusBot pack metadata');
+
+    const customWebp = await imageToWebpSticker(dummyJpg, { pack: 'CustomPack', author: 'CustomAuthor' });
+    assert.ok(customWebp.includes(Buffer.from('CustomAuthor')), 'WebP buffer should contain custom author');
 
     const pngBuffer = await stickerToPng(webpBuffer);
     assert.ok(pngBuffer.length > 50, 'PNG buffer should be valid');
