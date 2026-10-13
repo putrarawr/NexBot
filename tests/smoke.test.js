@@ -368,10 +368,11 @@ async function runAllTests() {
     ];
 
     const defWin = selectLrcWindow(sampleSegments, {});
-    assert.equal(defWin.startTime, 3.5);
+    assert.equal(defWin.startTime, 0);
     assert.ok(defWin.activeSegments.length > 0);
 
     const fullWin = selectLrcWindow(sampleSegments, { isFull: true });
+    assert.equal(fullWin.startTime, 0);
     assert.equal(fullWin.activeSegments.length, sampleSegments.length);
     assert.equal(fullWin.partLabel, 'Full Lirik (Lengkap)');
 
@@ -821,7 +822,7 @@ async function runAllTests() {
       assert.ok(res.isSuccess);
       assert.ok(res.stdout.includes('SMOKE_TEST_OK_49'));
     } catch (err) {
-      assert.ok(err.message.includes('Wandbox') || err.message.includes('timeout') || err.message.includes('aborted'));
+      assert.ok(err.message.includes('Wandbox') || err.message.includes('timeout') || err.message.includes('aborted') || err.message.includes('fetch') || err.message.includes('ETIMEDOUT'));
     }
   });
 

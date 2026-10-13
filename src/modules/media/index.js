@@ -806,7 +806,7 @@ export function registerMediaCommands() {
 
       const isSongCommand = command.toLowerCase() === 'bratsong' || command.toLowerCase() === 'bratlyric' || command.toLowerCase() === 'bratmusic';
       const hasSongFlag = /-song\b|-lagu\b/i.test(text);
-      const isSongMode = isSongCommand || hasSongFlag;
+      const isExplicitText = /-text\b|-teks\b/i.test(text);
 
       const isFull = /-full\b|-lengkap\b|-semua\b/i.test(text);
       const isReff = /-reff\b|-chorus\b|-ref\b/i.test(text);
@@ -835,6 +835,7 @@ export function registerMediaCommands() {
         .replace(/(?:lirik:|-lirik\s+)(["']?).+?\1(?:\s+-[a-z0-9]+|\s*$)/gi, '')
         .replace(/-song\b/gi, '')
         .replace(/-lagu\b/gi, '')
+        .replace(/-text\b|-teks\b/gi, '')
         .replace(/-full\b|-lengkap\b|-semua\b/gi, '')
         .replace(/-reff\b|-chorus\b|-ref\b/gi, '')
         .replace(/-rap\b/gi, '')
@@ -844,25 +845,37 @@ export function registerMediaCommands() {
         .replace(/-white\b/gi, '')
         .trim();
 
+      const hasSongSectionFlag = isFull || isReff || isRap || fromTime !== null || !!lyricSearch;
+      let isSongMode = (isSongCommand || hasSongFlag || hasSongSectionFlag) && !isExplicitText;
+
       if (!cleanedText && !quotedAudio) {
         return reply(
           `[!] Format penggunaan Brat Video MP4:\n\n` +
           `1. Sinkron Lirik Lagu (Default 30 Detik):\n` +
-          `<code>${prefix}bratmp4 -song Fix You Coldplay</code> atau <code>${prefix}bratsong Laskar Pelangi -green</code>\n\n` +
+          `<code>${prefix}bratmp4 Fix You Coldplay</code> atau <code>${prefix}bratmp4 -song Laskar Pelangi -green</code>\n\n` +
           `2. Request Bagian Lagu Tertentu:\n` +
-          `• Reff/Chorus: <code>${prefix}bratmp4 -song Laskar Pelangi -reff</code>\n` +
-          `• Bagian Rap: <code>${prefix}bratmp4 -song Judul -rap</code>\n` +
-          `• Full Lirik Lagu: <code>${prefix}bratmp4 -song Judul -full</code>\n` +
-          `• Menit tertentu: <code>${prefix}bratmp4 -song Judul -from 01:25</code>\n` +
-          `• Cari lirik: <code>${prefix}bratmp4 -song Judul lirik:menarilah</code>\n\n` +
+          `• Reff/Chorus: <code>${prefix}bratmp4 Laskar Pelangi -reff</code>\n` +
+          `• Bagian Rap: <code>${prefix}bratmp4 Eminem Godzilla -rap</code>\n` +
+          `• Full Lirik Lagu: <code>${prefix}bratmp4 Judul Lagu -full</code>\n` +
+          `• Menit tertentu: <code>${prefix}bratmp4 Judul Lagu -from 01:25</code>\n` +
+          `• Cari lirik: <code>${prefix}bratmp4 Judul Lagu lirik:menarilah</code>\n\n` +
           `3. Balas Audio/Voice Note:\n` +
           `Balas pesan audio dengan <code>${prefix}bratmp4 baris satu / baris dua</code>\n\n` +
           `4. Video Teks Kustom:\n` +
-          `<code>${prefix}bratmp4 kamu nanya tapi kamu ga dengerin</code>`
+          `<code>${prefix}bratmp4 -text kamu nanya tapi kamu ga dengerin</code>`
         );
       }
 
       try {
+        if (!isSongMode && !isExplicitText && !quotedAudio && cleanedText) {
+          try {
+            const detectedLyrics = await fetchSongLyricsWithSync(cleanedText);
+            if (detectedLyrics?.syncedLyrics) {
+              isSongMode = true;
+            }
+          } catch {}
+        }
+
         if (isSongMode) {
           await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik untuk "${cleanedText}"...`);
           const result = await generateBratVideoMp4({
@@ -1302,20 +1315,95 @@ export function getAudioDuration(audioPath) {
 export async function fetchSongLyricsWithSync(query) {
   const clean = String(query || '').trim();
   if (!clean) return null;
-  const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(clean)}`;
-  const res = await fetch(searchUrl, {
-    headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!res.ok) throw new Error(`LRC API status HTTP ${res.status}`);
-  const items = await res.json();
+
+  let canonicalTrack = clean;
+  let canonicalArtist = '';
+  let canonicalDuration = 0;
+
+  // 1. Coba cari metadata lagu di iTunes untuk dapatkan judul resmi dan artis resmi
+  try {
+    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(clean)}&entity=song&limit=3`;
+    const itunesRes = await fetch(itunesUrl, { signal: AbortSignal.timeout(5000) });
+    if (itunesRes.ok) {
+      const itunesData = await itunesRes.json();
+      if (itunesData.results && itunesData.results.length > 0) {
+        canonicalTrack = itunesData.results[0].trackName;
+        canonicalArtist = itunesData.results[0].artistName;
+        canonicalDuration = (itunesData.results[0].trackTimeMillis || 0) / 1000;
+      }
+    }
+  } catch {}
+
+  const baseTrack = canonicalTrack.replace(/\(.*?\)|\[.*?\]/g, '').trim();
+  const baseArtist = canonicalArtist.split(/[,&]/)[0].trim();
+
+  let items = [];
+
+  // 2. Cari di LRCLIB dengan track dan artist teridentifikasi
+  if (baseArtist) {
+    try {
+      const u1 = `https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}&artist_name=${encodeURIComponent(baseArtist)}`;
+      const r = await fetch(u1, {
+        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) items = await r.json();
+    } catch {}
+  }
+
+  if (!items || items.length === 0) {
+    try {
+      const u2 = `https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}`;
+      const r = await fetch(u2, {
+        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) items = await r.json();
+    } catch {}
+  }
+
+  if (!items || items.length === 0) {
+    try {
+      const u3 = `https://lrclib.net/api/search?q=${encodeURIComponent(clean)}`;
+      const r = await fetch(u3, {
+        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (r.ok) items = await r.json();
+    } catch {}
+  }
+
   if (!Array.isArray(items) || items.length === 0) return null;
-  const match = items.find((i) => i.syncedLyrics) || items.find((i) => i.plainLyrics) || items[0];
+
+  // 3. Beri skor pada kandidat lirik agar tidak salah ambil cover/remix/artis lain
+  const scored = items.map((item) => {
+    let score = 0;
+    if (item.syncedLyrics) score += 60;
+    else if (item.plainLyrics) score += 20;
+
+    if (canonicalDuration > 0 && item.duration) {
+      const diff = Math.abs(item.duration - canonicalDuration);
+      if (diff < 4) score += 40;
+      else if (diff < 12) score += 20;
+    }
+
+    const itemArtist = (item.artistName || '').toLowerCase();
+    if (baseArtist && itemArtist.includes(baseArtist.toLowerCase())) score += 30;
+
+    const itemTrack = (item.trackName || '').toLowerCase();
+    if (itemTrack.includes(baseTrack.toLowerCase()) || baseTrack.toLowerCase().includes(itemTrack)) score += 20;
+
+    return { item, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const match = scored[0].item;
+
   return {
-    trackName: match.trackName,
-    artistName: match.artistName,
+    trackName: match.trackName || canonicalTrack,
+    artistName: match.artistName || canonicalArtist || 'Unknown Artist',
     albumName: match.albumName,
-    duration: match.duration,
+    duration: match.duration || canonicalDuration || 0,
     syncedLyrics: match.syncedLyrics || '',
     plainLyrics: match.plainLyrics || '',
   };
@@ -1334,7 +1422,7 @@ export function parseLrcLyrics(lrcString) {
       const seconds = parseFloat(match[2]);
       const totalSeconds = minutes * 60 + seconds;
       const text = match[3].trim();
-      if (text) {
+      if (text && !/^\[.*?\]$/.test(text)) {
         result.push({
           time: totalSeconds,
           text,
@@ -1344,7 +1432,22 @@ export function parseLrcLyrics(lrcString) {
   }
 
   result.sort((a, b) => a.time - b.time);
-  return result;
+
+  // Filter duplicate timestamps atau lines berturut-turut yang identik
+  const filtered = [];
+  for (let i = 0; i < result.length; i++) {
+    const cur = result[i];
+    const prev = filtered[filtered.length - 1];
+    if (prev && Math.abs(cur.time - prev.time) < 0.25) {
+      if (cur.text.length > prev.text.length) {
+        filtered[filtered.length - 1] = cur;
+      }
+    } else {
+      filtered.push(cur);
+    }
+  }
+
+  return filtered;
 }
 
 export function parseTimeSeconds(str) {
@@ -1369,7 +1472,7 @@ export function selectLrcWindow(segments, {
   maxDuration = 35,
 } = {}) {
   if (!segments || segments.length === 0) {
-    return { activeSegments: [], startTime: 0, partLabel: 'Intro' };
+    return { activeSegments: [], startTime: 0, partLabel: 'Intro', isFull };
   }
 
   let startIndex = 0;
@@ -1377,6 +1480,7 @@ export function selectLrcWindow(segments, {
 
   if (isFull) {
     partLabel = 'Full Lirik (Lengkap)';
+    startIndex = 0;
   } else if (lyricSearch) {
     const q = lyricSearch.toLowerCase().trim();
     const foundIdx = segments.findIndex((s) => s.text.toLowerCase().includes(q));
@@ -1443,7 +1547,18 @@ export function selectLrcWindow(segments, {
   }
 
   const selectedFirst = segments[startIndex] || segments[0];
-  const startTime = Math.max(0, selectedFirst.time - 1.5);
+  let startTime = 0;
+  if (isFull) {
+    startTime = 0;
+  } else if (startIndex === 0) {
+    if (selectedFirst.time <= 6.0) {
+      startTime = 0;
+    } else {
+      startTime = Math.max(0, selectedFirst.time - 2.0);
+    }
+  } else {
+    startTime = Math.max(0, selectedFirst.time - 1.5);
+  }
 
   let activeSegments = [];
   if (isFull) {
@@ -1488,12 +1603,27 @@ export async function generateBratVideoMp4({
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
 
-    const searchTarget = `ytsearch1:${lyricsData.trackName} ${lyricsData.artistName} official audio`;
+    if (!lyricsData.syncedLyrics) {
+      throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
+    }
+
+    const segments = parseLrcLyrics(lyricsData.syncedLyrics);
+    if (segments.length === 0) {
+      throw new Error(`Format lirik lagu "${lyricsData.trackName}" tidak dapat diproses.`);
+    }
+
+    const searchTarget = `${lyricsData.artistName} - ${lyricsData.trackName}`;
     let musicTrack = null;
     try {
-      musicTrack = await downloadMusicTrack(searchTarget);
+      musicTrack = await downloadMusicTrack(searchTarget, {
+        targetDuration: lyricsData.duration,
+        title: lyricsData.trackName,
+        artist: lyricsData.artistName,
+      });
     } catch {
-      musicTrack = await downloadMusicTrack(cleanQuery);
+      musicTrack = await downloadMusicTrack(cleanQuery, {
+        targetDuration: lyricsData.duration,
+      });
     }
 
     if (!musicTrack?.buffer) {
@@ -1504,16 +1634,6 @@ export async function generateBratVideoMp4({
     try {
       const audioPath = path.join(tmpDir, 'track.mp3');
       fs.writeFileSync(audioPath, musicTrack.buffer);
-
-      let segments = lyricsData.syncedLyrics ? parseLrcLyrics(lyricsData.syncedLyrics) : [];
-      if (segments.length === 0) {
-        const plainLines = lyricsData.plainLyrics
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0 && !l.startsWith('['));
-        const chosen = isFull ? plainLines : plainLines.slice(0, 8);
-        segments = chosen.map((t, idx) => ({ time: idx * 4.0, text: t }));
-      }
 
       const windowInfo = selectLrcWindow(segments, {
         isFull,
@@ -1582,9 +1702,10 @@ export async function generateBratVideoMp4({
       lines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
       fs.writeFileSync(listPath, lines.join('\n'));
 
+      // Output seeking (-ss setelah -i) untuk akurasi sample-level
       const slicedAudio = path.join(tmpDir, 'sliced.aac');
       execSync(
-        `ffmpeg -y -accurate_seek -ss ${startTime.toFixed(3)} -i "${audioPath}" -t ${totalDuration.toFixed(3)} -c:a aac -b:a 192k "${slicedAudio}"`,
+        `ffmpeg -y -i "${audioPath}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -c:a aac -b:a 192k "${slicedAudio}"`,
         { timeout: 45000 }
       );
 

@@ -177,10 +177,39 @@ export async function downloadMusicTrack(target, metadata = {}) {
     }
   }
 
+  if (metadata.targetDuration && !isSearchPrefixed && !isDirectMediaUrl) {
+    try {
+      const safeDuration = Number(metadata.targetDuration);
+      const searchTargetCand = `ytsearch5:${searchTerm} audio`;
+      const printTemplate = '%(id)s\t%(duration)s';
+      const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
+      const { stdout: candOut } = await execAsync(candCmd, { timeout: 15000 });
+      const candLines = candOut.split(/\r?\n/).filter(Boolean);
+      let bestId = null;
+      let minDiff = Infinity;
+      for (const line of candLines) {
+        const [id, durStr] = line.split('\t');
+        const d = parseFloat(durStr);
+        if (id && !isNaN(d)) {
+          const diff = Math.abs(d - safeDuration);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestId = id;
+          }
+        }
+      }
+      if (bestId && minDiff <= 12) {
+        searchTerm = `https://www.youtube.com/watch?v=${bestId}`;
+      }
+    } catch (e) {
+      logger.debug('Target duration candidate lookup fallback:', e.message);
+    }
+  }
+
   const rand = Math.random().toString(36).slice(2, 8);
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
-  const isSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
-  const searchTarget = isSearchPrefixed ? searchTerm : `scsearch1:${searchTerm}`;
+  const resolvedSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
+  const searchTarget = resolvedSearchPrefixed ? searchTerm : `scsearch1:${searchTerm}`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 --max-filesize 35M -o "${outTemplate}"`;
   const directArgs = '--extractor-args "youtube:player_client=android,web" ';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
