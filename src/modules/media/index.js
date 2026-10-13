@@ -2564,7 +2564,7 @@ export async function generateBratVideoMp4({
       const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / 24;
       let safeStartTime = startTime;
-      if (audioDuration > 0 && audioDuration > totalDuration + 2 && safeStartTime + totalDuration > audioDuration) {
+      if (audioDuration > 0 && safeStartTime + totalDuration > audioDuration) {
         safeStartTime = Math.max(0, audioDuration - totalDuration);
       }
 

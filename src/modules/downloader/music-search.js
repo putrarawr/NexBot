@@ -184,27 +184,52 @@ export async function downloadMusicTrack(target, metadata = {}) {
     try {
       const safeDuration = Number(metadata.targetDuration);
       const cleanTerm = searchTerm.replace(/^(ytsearch\d*:|scsearch\d*:)/i, '').replace(/\baudio\b/gi, '').trim();
-      const searchTargetCand = `ytsearch6:${cleanTerm} audio`;
-      const printTemplate = '%(id)s\t%(duration)s';
+      const searchTargetCand = `ytsearch10:${cleanTerm} audio`;
+      const printTemplate = '%(id)s\t%(duration)s\t%(title)s';
       const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
       const { stdout: candOut } = await execAsync(candCmd, { timeout: 20000 });
       const candLines = candOut.split(/\r?\n/).filter(Boolean);
       let bestId = null;
-      let minDiff = Infinity;
+      let highestScore = -Infinity;
+
+      const unwantedRegex = /\b(instrumental|karaoke|backing track|beat only|off vocal|minus one|no vocal|violin|piano|guitar|remake|reprod)\b/i;
+      const userWantsInstrumental = unwantedRegex.test(cleanTerm);
+
       for (const line of candLines) {
-        const [id, durStr] = line.split('\t');
+        const parts = line.split('\t');
+        const id = parts[0];
+        const durStr = parts[1];
+        const title = parts[2] || '';
         const d = parseFloat(durStr);
         if (id && !isNaN(d) && d > 0) {
-          // Abaikan video pendek (Shorts) jika lagu aslinya berdurasi panjang
-          if (safeDuration >= 90 && d < 60) continue;
+          // Abaikan video pendek jika lagu aslinya berdurasi panjang
+          if (safeDuration >= 60 && d < 45) continue;
+
+          // Abaikan versi instrumental/karaoke jika pengguna tidak memintanya
+          if (!userWantsInstrumental && unwantedRegex.test(title)) {
+            continue;
+          }
+
+          let score = 50;
           const diff = Math.abs(d - safeDuration);
-          if (diff < minDiff) {
-            minDiff = diff;
+          if (diff <= 3) score += 45;
+          else if (diff <= 10) score += 25;
+          else if (diff <= 30) score += 10;
+          else if (diff > 45) score -= 40;
+
+          if (/official (audio|video|music video)/i.test(title)) score += 30;
+          else if (/audio/i.test(title)) score += 15;
+          if (metadata.artist && new RegExp(metadata.artist.replace(/[^a-z0-9]/gi, ''), 'i').test(title.replace(/[^a-z0-9]/gi, ''))) {
+            score += 20;
+          }
+
+          if (score > highestScore) {
+            highestScore = score;
             bestId = id;
           }
         }
       }
-      if (bestId && minDiff <= 35) {
+      if (bestId && highestScore > 0) {
         searchTerm = `https://www.youtube.com/watch?v=${bestId}`;
       }
     } catch (e) {
@@ -237,7 +262,34 @@ export async function downloadMusicTrack(target, metadata = {}) {
       await execAsync(fallbackCmd, { timeout: 45000 });
     } catch (fallbackErr) {
       logger.warn('YouTube fallback failed, trying SoundCloud fallback:', fallbackErr.message);
-      const scCmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(`scsearch1:${cleanFallback}`)}`;
+      let scTarget = `scsearch1:${cleanFallback}`;
+      if (metadata.targetDuration && Number(metadata.targetDuration) >= 60) {
+        try {
+          const safeDur = Number(metadata.targetDuration);
+          const scCandCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(`scsearch5:${cleanFallback}`)} --print "%(url)s\t%(duration)s\t%(title)s"`;
+          const { stdout: scOut } = await execAsync(scCandCmd, { timeout: 15000 });
+          const scLines = scOut.split(/\r?\n/).filter(Boolean);
+          let bestScUrl = null;
+          let minDiff = Infinity;
+          for (const line of scLines) {
+            const [url, durStr] = line.split('\t');
+            const d = parseFloat(durStr);
+            // Abaikan preview klip pendek 30s di SoundCloud jika lagu berdurasi panjang
+            if (url && !isNaN(d) && d >= 50) {
+              const diff = Math.abs(d - safeDur);
+              if (diff < minDiff && diff <= 45) {
+                minDiff = diff;
+                bestScUrl = url;
+              }
+            }
+          }
+          if (bestScUrl) {
+            scTarget = bestScUrl;
+          }
+        } catch {}
+      }
+
+      const scCmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(scTarget)}`;
       try {
         await execAsync(scCmd, { timeout: 30000 });
       } catch (scErr) {
