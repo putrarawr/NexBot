@@ -2043,24 +2043,45 @@ export async function generateBratVideoMp4({
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
 
+    // Deteksi apakah lagu atau segmen ini memiliki aliran rap cepat (high tempo / words per second)
+    const isFastRapSong = isRap || (Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.some((s) => {
+      const dur = s.duration || 1.0;
+      const count = s.words?.length || s.text.split(/\s+/).length;
+      return (count / Math.max(0.4, dur)) >= 3.8;
+    }));
+
     let segments;
     if (lyricsData.hasWordSync && Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.length > 0) {
-      // Offset kata: Jika pengguna memasukkan offset kustom (-offset), gunakan nilai tersebut.
-      // Jika default, lead offset -0.04s agar kata muncul tepat saat attack nada vokal dibunyikan.
-      const actualOffset = isCustomOffset ? syncOffset : -0.04;
-      segments = lyricsData.wordSegments.map((ws) => ({
-        ...ws,
-        time: Math.max(0, ws.time + actualOffset),
-        words: (ws.words || []).map((w) => ({
-          ...w,
-          time: Math.max(0, w.time + actualOffset),
-        })),
-      }));
+      // Offset kata:
+      // Jika pengguna memasukkan offset kustom (-offset), gunakan nilai tersebut.
+      // Jika rap cepat, gunakan lead offset -0.12s agar kata muncul tepat sebelum artikulasi vokal konsonan cepat.
+      // Jika lagu normal, lead offset -0.06s untuk sinkronisasi nada vokal yang natural.
+      const defaultLead = isFastRapSong ? -0.12 : -0.06;
+      const baseOffset = isCustomOffset ? syncOffset : defaultLead;
+
+      segments = lyricsData.wordSegments.map((ws) => {
+        const lineDur = ws.duration || 1.0;
+        const lineWords = ws.words?.length || ws.text.split(/\s+/).length;
+        const isLineRap = (lineWords / Math.max(0.4, lineDur)) >= 3.8;
+        const effectiveOffset = isCustomOffset ? syncOffset : (isLineRap ? -0.12 : baseOffset);
+
+        return {
+          ...ws,
+          time: Math.max(0, ws.time + effectiveOffset),
+          words: (ws.words || []).map((w) => ({
+            ...w,
+            time: Math.max(0, w.time + effectiveOffset),
+          })),
+        };
+      });
     } else {
       if (!lyricsData.syncedLyrics) {
         throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
       }
-      segments = parseLrcLyrics(lyricsData.syncedLyrics, syncOffset);
+      // Fallback LRC: Jika rap cepat, lead offset -0.12s agar baris lirik tidak tertinggal flow rapper
+      const defaultLrcOffset = isFastRapSong ? -0.12 : -0.06;
+      const effectiveLrcOffset = isCustomOffset ? syncOffset : defaultLrcOffset;
+      segments = parseLrcLyrics(lyricsData.syncedLyrics, effectiveLrcOffset);
     }
 
     if (segments.length === 0) {
@@ -2208,6 +2229,7 @@ export async function generateBratVideoMp4({
 
           if (hasExactWords) {
             // Path 1: Sinkronisasi presisi tinggi per nada vokal dari Apple Music / Spotify
+            const lineAvailFrames = Math.max(numWords, totalLineFrames);
             const wordStartFrames = [currentLineStartFrame];
             for (let wIdx = 1; wIdx < numWords; wIdx++) {
               let targetTime;
@@ -2215,24 +2237,30 @@ export async function generateBratVideoMp4({
                 targetTime = cur.words[wIdx].time;
               } else {
                 const lastW = cur.words[cur.words.length - 1];
-                targetTime = lastW.time + (wIdx - cur.words.length + 1) * 0.35;
+                targetTime = lastW.time + (wIdx - cur.words.length + 1) * 0.15;
               }
               const rawF = Math.round((targetTime - startTime) * 24);
-              const minF = wordStartFrames[wIdx - 1] + 2;
-              const maxF = nextLineStartFrame - (numWords - wIdx) * 2;
+              // Untuk rap cepat, izinkan kata muncul berurutan tiap frame (minGap 1 frame = 41.6ms) tanpa jeda buatan
+              const minF = wordStartFrames[wIdx - 1] + 1;
+              const maxF = currentLineStartFrame + lineAvailFrames - (numWords - wIdx);
               const targetF = Math.min(Math.max(minF, rawF), Math.max(minF, maxF));
               wordStartFrames.push(targetF);
             }
 
             for (let wIdx = 0; wIdx < numWords - 1; wIdx++) {
-              wordFramesList.push(Math.max(2, wordStartFrames[wIdx + 1] - wordStartFrames[wIdx]));
+              wordFramesList.push(Math.max(1, wordStartFrames[wIdx + 1] - wordStartFrames[wIdx]));
             }
             const usedSoFar = wordFramesList.reduce((a, b) => a + b, 0);
-            wordFramesList.push(Math.max(2, totalLineFrames - usedSoFar));
+            wordFramesList.push(Math.max(1, totalLineFrames - usedSoFar));
           } else {
             // Path 2: Fallback berbasis bobot suku kata dengan alokasi jendela aktif menyanyi
-            const pauseFrames = Math.max(3, Math.round(totalLineFrames * 0.18));
-            const vocalFrames = Math.max(numWords * 2, totalLineFrames - pauseFrames);
+            const lineDur = totalLineFrames / 24;
+            const lineWps = numWords / Math.max(0.4, lineDur);
+            const isLineRapFlow = isRap || lineWps >= 3.8;
+
+            // Pada rap cepat, rapper tidak mengambil jeda hening di akhir baris (flow sambung menyambung)
+            const pauseFrames = isLineRapFlow ? 0 : Math.max(2, Math.round(totalLineFrames * 0.12));
+            const vocalFrames = Math.max(numWords, totalLineFrames - pauseFrames);
 
             const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
               const isLast = idx === numWords - 1;
@@ -2244,9 +2272,9 @@ export async function generateBratVideoMp4({
             for (let step = 1; step <= numWords; step++) {
               const activeIdx = step - 1;
               if (step === numWords) {
-                wordFramesList.push(Math.max(2, totalLineFrames - elapsedFrames));
+                wordFramesList.push(Math.max(1, totalLineFrames - elapsedFrames));
               } else {
-                const wf = Math.max(2, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
+                const wf = Math.max(1, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
                 wordFramesList.push(wf);
                 elapsedFrames += wf;
               }
@@ -2280,21 +2308,24 @@ export async function generateBratVideoMp4({
               }
             } else {
               // Animasi halus kata berikutnya pada layer yang sama
-              if (wordFrames >= 7) {
+              if (wordFrames >= 6) {
                 transitions = [
-                  { factor: 1.0, op: 0.25, dy: 1.5, blur: 0.9 },
-                  { factor: 1.0, op: 0.55, dy: 0.8, blur: 0.9 },
-                  { factor: 1.0, op: 0.85, dy: 0.3, blur: 0.9 },
+                  { factor: 1.0, op: 0.30, dy: 1.2, blur: 0.9 },
+                  { factor: 1.0, op: 0.65, dy: 0.6, blur: 0.9 },
+                  { factor: 1.0, op: 0.90, dy: 0.2, blur: 0.9 },
                 ];
               } else if (wordFrames >= 4) {
                 transitions = [
-                  { factor: 1.0, op: 0.35, dy: 1.2, blur: 0.9 },
-                  { factor: 1.0, op: 0.75, dy: 0.4, blur: 0.9 },
-                ];
-              } else if (wordFrames >= 2) {
-                transitions = [
                   { factor: 1.0, op: 0.50, dy: 0.8, blur: 0.9 },
+                  { factor: 1.0, op: 0.85, dy: 0.3, blur: 0.9 },
                 ];
+              } else if (wordFrames === 3) {
+                transitions = [
+                  { factor: 1.0, op: 0.70, dy: 0.4, blur: 0.9 },
+                ];
+              } else {
+                // Untuk rap super cepat (1-2 frame per kata): langsung solid punchy tanpa delay visual
+                transitions = [];
               }
             }
 
