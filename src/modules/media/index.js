@@ -825,7 +825,7 @@ export function registerMediaCommands() {
         lyricSearch = lirikMatch[2].trim();
       }
 
-      let syncOffset = -0.20;
+      let syncOffset = -0.35;
       const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
       if (offsetMatch) {
         const parsedOffset = parseFloat(offsetMatch[1]);
@@ -1635,7 +1635,7 @@ export async function generateBratVideoMp4({
   lyricSearch = '',
   isLineMode = false,
   isTypingEffect = false,
-  syncOffset = -0.20,
+  syncOffset = -0.35,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1713,17 +1713,26 @@ export async function generateBratVideoMp4({
 
         if (!isLineMode && numWords > 1 && segDuration >= 1.0) {
           // Default: Kata per kata muncul satu persatu sinkron dengan alunan vokal lagu
+          // Bobot durasi tiap kata proporsional terhadap panjang suku kata kata tersebut
           const vocalProportion = Math.min(0.85, Math.max(0.60, 0.45 + (numWords * 0.05)));
           const vocalDuration = Math.max(0.3, segDuration * vocalProportion);
-          const stepDuration = Math.max(0.10, vocalDuration / numWords);
-          const holdDuration = Math.max(0.2, segDuration - (stepDuration * (numWords - 1)));
+          const wordWeights = lineLayout.positionedWords.map((pw) => Math.max(2, Math.min(8, pw.word.length)));
+          const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
 
+          let elapsedDuration = 0;
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
             const svg = renderBratSvg(lineLayout, visible);
             const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
             await sharp(Buffer.from(svg)).png().toFile(framePath);
-            const dur = step === numWords ? holdDuration : stepDuration;
+
+            let dur;
+            if (step === numWords) {
+              dur = Math.max(0.15, segDuration - elapsedDuration);
+            } else {
+              dur = Math.max(0.08, (vocalDuration * wordWeights[step - 1]) / totalWeight);
+              elapsedDuration += dur;
+            }
             concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
           }
         } else {
@@ -1745,16 +1754,10 @@ export async function generateBratVideoMp4({
       lines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
       fs.writeFileSync(listPath, lines.join('\n'));
 
-      // Output seeking (-ss setelah -i) untuk akurasi sample-level
-      const slicedAudio = path.join(tmpDir, 'sliced.aac');
-      execSync(
-        `ffmpeg -y -i "${audioPath}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -c:a aac -b:a 192k "${slicedAudio}"`,
-        { timeout: 45000 }
-      );
-
+      // Muxing langsung dalam satu pass dengan presisi sample audio & video
       const outMp4 = path.join(tmpDir, 'output.mp4');
       execSync(
-        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -i "${slicedAudio}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a copy -shortest -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -shortest -movflags +faststart "${outMp4}"`,
         { timeout: 60000 }
       );
 

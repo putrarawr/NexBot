@@ -366,6 +366,9 @@ async function runAllTests() {
     assert.equal(lrcOffset[0].text, 'baris lirik satu');
     assert.ok(!lrcOffset[0].text.includes('\u0000'));
 
+    const lrcOffset35 = parseLrcLyrics('[00:01.50] baris lirik satu', -0.35);
+    assert.equal(lrcOffset35[0].time, 1.15);
+
     const sampleSegments = [
       { time: 5, text: 'intro verse satu' },
       { time: 15, text: 'intro verse dua' },
