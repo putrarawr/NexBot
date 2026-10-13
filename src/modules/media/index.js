@@ -1558,9 +1558,9 @@ export function selectLrcWindow(segments, {
   } else if (isIntro) {
     startIndex = 0;
     partLabel = 'Awal Lagu / Intro (30s)';
-  } else if (isRap || (preferViral && !isReff)) {
+  } else if (isRap) {
     let highestWps = 0;
-    let rapIdx = -1;
+    let rapIdx = 0;
     for (let i = 0; i < segments.length - 1; i++) {
       const dur = Math.max(1, segments[i + 1].time - segments[i].time);
       const words = segments[i].text.trim().split(/\s+/).length;
@@ -1570,41 +1570,9 @@ export function selectLrcWindow(segments, {
         rapIdx = i;
       }
     }
-
-    if (isRap || (preferViral && highestWps >= 3.6 && rapIdx !== -1)) {
-      startIndex = Math.max(0, rapIdx);
-      partLabel = 'Bagian Rap / Verse Cepat (30s)';
-    } else if (preferViral) {
-      const textCounts = new Map();
-      segments.forEach((s) => {
-        const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-        if (clean.length > 5) {
-          textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
-        }
-      });
-
-      const totalSongDuration = segments[segments.length - 1].time;
-      const minReffTime = totalSongDuration * 0.20;
-      let bestReffIdx = -1;
-
-      for (let i = 0; i < segments.length; i++) {
-        const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-        if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
-          bestReffIdx = i;
-          break;
-        }
-      }
-
-      if (bestReffIdx !== -1) {
-        startIndex = bestReffIdx;
-        partLabel = 'Reff / Chorus Viral (30s)';
-      } else {
-        const targetTime = totalSongDuration * 0.30;
-        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
-        partLabel = 'Bagian Viral / Puncak Lagu (30s)';
-      }
-    }
-  } else if (isReff) {
+    startIndex = rapIdx;
+    partLabel = 'Bagian Rap / Verse Cepat (30s)';
+  } else if (isReff || preferViral) {
     const textCounts = new Map();
     segments.forEach((s) => {
       const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
@@ -1614,7 +1582,7 @@ export function selectLrcWindow(segments, {
     });
 
     const totalSongDuration = segments[segments.length - 1].time;
-    const minReffTime = totalSongDuration * 0.25;
+    const minReffTime = totalSongDuration * 0.18;
     let bestReffIdx = -1;
 
     for (let i = 0; i < segments.length; i++) {
@@ -1627,11 +1595,30 @@ export function selectLrcWindow(segments, {
 
     if (bestReffIdx !== -1) {
       startIndex = bestReffIdx;
+      partLabel = 'Reff / Chorus (30s)';
     } else {
-      const targetTime = totalSongDuration * 0.35;
-      startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+      // Jika lirik tidak berulang persis, periksa apakah ada flow rap cepat
+      let highestWps = 0;
+      let rapIdx = -1;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const dur = Math.max(1, segments[i + 1].time - segments[i].time);
+        const words = segments[i].text.trim().split(/\s+/).length;
+        const wps = words / dur;
+        if (wps > highestWps && segments[i].time > 8 && words >= 6) {
+          highestWps = wps;
+          rapIdx = i;
+        }
+      }
+
+      if (highestWps >= 4.5 && rapIdx !== -1) {
+        startIndex = rapIdx;
+        partLabel = 'Bagian Rap / Verse Cepat (30s)';
+      } else {
+        const targetTime = totalSongDuration * 0.30;
+        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+        partLabel = 'Bagian Viral / Puncak Lagu (30s)';
+      }
     }
-    partLabel = 'Reff / Chorus (30s)';
   }
 
   const selectedFirst = segments[startIndex] || segments[0];
@@ -1758,7 +1745,8 @@ export async function generateBratVideoMp4({
       for (let i = 0; i < activeSegments.length; i++) {
         const cur = activeSegments[i];
         const next = activeSegments[i + 1];
-        const segDuration = next ? Math.max(0.5, next.time - cur.time) : 4.0;
+        const rawSegDur = next ? next.time - cur.time : 4.0;
+        const segDuration = next ? (isFull ? Math.max(0.5, rawSegDur) : Math.min(6.0, Math.max(0.5, rawSegDur))) : 4.0;
         const lineText = cur.text + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;

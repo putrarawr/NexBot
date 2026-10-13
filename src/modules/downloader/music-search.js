@@ -213,23 +213,29 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
   const resolvedSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
   const searchTarget = resolvedSearchPrefixed ? searchTerm : `ytsearch1:${searchTerm} audio`;
-  const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 --max-filesize 35M -o "${outTemplate}"`;
-  const directArgs = '--extractor-args "youtube:player_client=android,web" ';
+  const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
+  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=ios,android,web,mweb" ';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
-    await execAsync(cmd, { timeout: 60000 });
+    await execAsync(cmd, { timeout: 35000 });
   } catch (err) {
     logger.warn('Primary music download failed, trying YouTube fallback:', err.message);
     const cleanTerm = searchTerm.replace(/^(https?:\/\/[^\s]+|ytsearch\d*:|scsearch\d*:)/i, '').trim();
     const fallbackTitle = metadata.title && metadata.artist ? `${metadata.artist} ${metadata.title}` : (metadata.title || cleanTerm || searchTerm);
     const cleanFallback = fallbackTitle.replace(/^https?:\/\/[^\s]+/i, '').trim() || cleanTerm;
-    const fallbackCmd = `yt-dlp --extractor-args "youtube:player_client=android,web" ${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback}`)}`;
+    const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback}`)}`;
     try {
-      await execAsync(fallbackCmd, { timeout: 60000 });
+      await execAsync(fallbackCmd, { timeout: 35000 });
     } catch (fallbackErr) {
-      logger.warn('Candidate title fallback failed:', fallbackErr.message);
-      throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+      logger.warn('YouTube fallback failed, trying SoundCloud fallback:', fallbackErr.message);
+      const scCmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(`scsearch1:${cleanFallback}`)}`;
+      try {
+        await execAsync(scCmd, { timeout: 25000 });
+      } catch (scErr) {
+        logger.warn('SoundCloud fallback failed:', scErr.message);
+        throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+      }
     }
   }
 
