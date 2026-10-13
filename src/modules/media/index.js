@@ -827,7 +827,7 @@ export function registerMediaCommands() {
         lyricSearch = lirikMatch[2].trim();
       }
 
-      let syncOffset = -0.45;
+      let syncOffset = -0.25;
       const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
       if (offsetMatch) {
         const parsedOffset = parseFloat(offsetMatch[1]);
@@ -1672,7 +1672,7 @@ export async function generateBratVideoMp4({
   lyricSearch = '',
   isLineMode = false,
   isTypingEffect = false,
-  syncOffset = -0.45,
+  syncOffset = -0.25,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1752,9 +1752,9 @@ export async function generateBratVideoMp4({
         const numWords = lineLayout.positionedWords.length;
 
         if (!isLineMode && numWords > 1 && segDuration >= 1.0) {
-          // Default: Kata per kata muncul satu persatu dengan animasi smooth
-          const vocalProportion = Math.min(0.85, Math.max(0.60, 0.45 + (numWords * 0.05)));
-          const vocalDuration = Math.max(0.3, segDuration * vocalProportion);
+          // Kata per kata muncul stabil mengikuti tempo alami bait vokal lagu
+          const pauseDur = Math.min(0.4, Math.max(0.15, segDuration * 0.08));
+          const activeVocal = segDuration - pauseDur;
           const wordWeights = lineLayout.positionedWords.map((pw) => Math.max(2, Math.min(8, pw.word.length)));
           const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
 
@@ -1765,32 +1765,17 @@ export async function generateBratVideoMp4({
 
             let dur;
             if (step === numWords) {
-              dur = Math.max(0.15, segDuration - elapsedDuration);
+              dur = Math.max(0.2, segDuration - elapsedDuration);
             } else {
-              dur = Math.max(0.08, (vocalDuration * wordWeights[activeIdx]) / totalWeight);
+              dur = Math.max(0.12, (activeVocal * wordWeights[activeIdx]) / totalWeight);
               elapsedDuration += dur;
             }
 
-            // Animasi smooth: frame transisi fade-in (durasi 0.05s) diikuti frame solid
-            if (dur >= 0.16) {
-              const fadeDur = 0.05;
-              const solidDur = dur - fadeDur;
-
-              const svgFade = renderBratSvg(lineLayout, visible, activeIdx, 0.45);
-              const pathFade = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svgFade)).png().toFile(pathFade);
-              concatEntries.push({ file: pathFade, duration: fadeDur.toFixed(3) });
-
-              const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0);
-              const pathSolid = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svgSolid)).png().toFile(pathSolid);
-              concatEntries.push({ file: pathSolid, duration: solidDur.toFixed(3) });
-            } else {
-              const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0);
-              const pathSolid = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svgSolid)).png().toFile(pathSolid);
-              concatEntries.push({ file: pathSolid, duration: dur.toFixed(3) });
-            }
+            // Teks muncul tegas, presisi & jernih (tanpa jitter 1-frame yang membuat patah-patah)
+            const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0);
+            const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+            await sharp(Buffer.from(svgSolid)).png().toFile(framePath);
+            concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
           }
         } else {
           // Mode baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
