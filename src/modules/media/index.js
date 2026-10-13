@@ -1419,12 +1419,12 @@ export function getAudioDuration(audioPath) {
   try {
     const out = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, {
       encoding: 'utf-8',
-      timeout: 5000,
+      timeout: 10000,
     });
     const dur = parseFloat(out.trim());
-    return !isNaN(dur) && dur > 0 ? dur : 5.0;
+    return !isNaN(dur) && dur > 0 ? dur : 0;
   } catch {
-    return 5.0;
+    return 0;
   }
 }
 
@@ -2044,16 +2044,12 @@ export function selectLrcWindow(segments, {
 
   const selectedFirst = segments[startIndex] || segments[0];
   let startTime = 0;
-  if (isFull) {
+  if (isFull || (startIndex === 0 && isIntro)) {
     startTime = 0;
-  } else if (startIndex === 0) {
-    if (selectedFirst.time <= 6.0) {
-      startTime = 0;
-    } else {
-      startTime = Math.max(0, selectedFirst.time - 2.0);
-    }
+  } else if (startIndex === 0 && selectedFirst.time <= 5.0) {
+    startTime = 0;
   } else {
-    startTime = Math.max(0, selectedFirst.time - 1.5);
+    startTime = Math.max(0, selectedFirst.time);
   }
 
   let activeSegments = [];
@@ -2213,65 +2209,28 @@ export async function generateBratVideoMp4({
       }
 
       const firstLineTheme = getLayerTheme(0, theme);
-      const introTheme = {
-        bg: firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff',
-        textColor: firstLineTheme.bg === '#ffffff' ? '#ffffff' : '#000000',
-      };
-      let prevLayerBg = introTheme.bg;
+      let prevLayerBg = firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff';
 
+      // Jika ada jeda instrumental di awal (misal isFull atau -intro), tahan teks lirik baris pertama tanpa kartu judul/artis
       const introDuration = activeSegments[0].time - startTime;
       if (introDuration > 0.05) {
         const introFrames = Math.max(1, Math.round(introDuration * 24));
-        const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
-        const introLayout = computeBratLayout(introText);
-
-        const openFadeFrames = Math.min(6, Math.floor(introFrames * 0.28));
-        const impactFrames = introFrames >= 14 ? 2 : (introFrames >= 6 ? 1 : 0);
-        const solidIntroFrames = Math.max(0, introFrames - openFadeFrames - impactFrames);
-
-        // 1. Opening: Cinematic Smooth Fade-In from Black (ala editing video kreator manusia)
-        for (let f = 0; f < openFadeFrames; f++) {
-          const progress = (f + 1) / (openFadeFrames + 1);
-          const op = progress;
-          const dy = (1 - progress) * 2.5;
-          const blur = 1.8 - progress * 0.9;
-          const frameBg = interpolateHexColor('#000000', introTheme.bg, progress);
-          const svg = renderBratSvg(introLayout, introLayout.positionedWords, -1, op, dy, frameBg, introTheme.textColor, blur);
-          const p = path.join(tmpDir, `intro_fade_${f}.png`);
-          await sharp(Buffer.from(svg)).png().toFile(p);
-          pushFrame(p, 1);
-        }
-
-        // 2. Opening Hold: Menampilkan judul lagu dan artis secara jelas dan estetis
-        if (solidIntroFrames > 0) {
-          const solidIntroSvg = renderBratSvg(introLayout, introLayout.positionedWords, -1, 1.0, 0, introTheme.bg, introTheme.textColor, 0.9);
-          const solidIntroPath = path.join(tmpDir, 'intro_solid.png');
-          await sharp(Buffer.from(solidIntroSvg)).png().toFile(solidIntroPath);
-          pushFrame(solidIntroPath, solidIntroFrames);
-        }
-
-        // 3. Opening Beat-Drop Impact Transition: Flash ritmis tepat saat nada vokal masuk
-        if (impactFrames === 2) {
-          const flashBg1 = interpolateHexColor(introTheme.bg, '#ffffff', 0.60);
-          const svg1 = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.85, 0.5, flashBg1, introTheme.textColor, 1.5);
-          const p1 = path.join(tmpDir, 'intro_impact_0.png');
-          await sharp(Buffer.from(svg1)).png().toFile(p1);
-          pushFrame(p1, 1);
-
-          const flashBg2 = interpolateHexColor(introTheme.bg, firstLineTheme.bg, 0.75);
-          const svg2 = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.50, 0.8, flashBg2, introTheme.textColor, 1.3);
-          const p2 = path.join(tmpDir, 'intro_impact_1.png');
-          await sharp(Buffer.from(svg2)).png().toFile(p2);
-          pushFrame(p2, 1);
-        } else if (impactFrames === 1) {
-          const flashBg = interpolateHexColor(introTheme.bg, '#ffffff', 0.50);
-          const svg = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.70, 0.5, flashBg, introTheme.textColor, 1.4);
-          const p = path.join(tmpDir, 'intro_impact_0.png');
-          await sharp(Buffer.from(svg)).png().toFile(p);
-          pushFrame(p, 1);
-        }
-      } else {
-        prevLayerBg = firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff';
+        const firstLineText = activeSegments[0].text + (theme ? ` ${theme}` : '');
+        const firstLayout = computeBratLayout(firstLineText);
+        const holdSvg = renderBratSvg(
+          firstLayout,
+          firstLayout.positionedWords,
+          -1,
+          0.85,
+          0.0,
+          firstLineTheme.bg,
+          firstLineTheme.textColor,
+          0.9
+        );
+        const holdPath = path.join(tmpDir, 'intro_hold.png');
+        await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+        pushFrame(holdPath, introFrames);
+        prevLayerBg = firstLineTheme.bg;
       }
 
       for (let i = 0; i < activeSegments.length; i++) {
@@ -2286,18 +2245,22 @@ export async function generateBratVideoMp4({
         if (next) {
           nextLineStartFrame = Math.round((next.time - startTime) * 24);
         } else {
-          const lastDur = cur.duration && cur.duration > 0 ? Math.max(3.0, cur.duration + 0.8) : 4.0;
+          const lastDur = cur.duration && cur.duration > 0 ? Math.max(2.5, cur.duration + 0.6) : 3.5;
           nextLineStartFrame = currentLineStartFrame + Math.round(lastDur * 24);
         }
 
-        const totalLineFrames = Math.max(6, nextLineStartFrame - currentLineStartFrame);
         const lineText = cur.text + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
+        // Untuk rap cepat atau baris rapat, tentukan minimum frame adaptif agar tidak mendahului vokal
+        const minRequiredFrames = Math.max(1, Math.min(numWords, isFastRapSong ? 2 : 3));
+        const rawAvailFrames = nextLineStartFrame - currentLineStartFrame;
+        const totalLineFrames = Math.max(minRequiredFrames, rawAvailFrames);
+
         const hasExactWords = !isLineMode && Boolean(cur.words && cur.words.length > 0);
 
-        if (!isLineMode && numWords > 1 && totalLineFrames >= 10) {
+        if (!isLineMode && numWords > 1 && totalLineFrames >= numWords) {
           let wordFramesList = [];
 
           if (hasExactWords) {
@@ -2332,7 +2295,7 @@ export async function generateBratVideoMp4({
             const isLineRapFlow = isRap || lineWps >= 3.8;
 
             // Pada rap cepat, rapper tidak mengambil jeda hening di akhir baris (flow sambung menyambung)
-            const pauseFrames = isLineRapFlow ? 0 : Math.max(2, Math.round(totalLineFrames * 0.12));
+            const pauseFrames = isLineRapFlow ? 0 : Math.max(1, Math.round(totalLineFrames * 0.10));
             const vocalFrames = Math.max(numWords, totalLineFrames - pauseFrames);
 
             const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
@@ -2348,8 +2311,10 @@ export async function generateBratVideoMp4({
                 wordFramesList.push(Math.max(1, totalLineFrames - elapsedFrames));
               } else {
                 const wf = Math.max(1, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
-                wordFramesList.push(wf);
-                elapsedFrames += wf;
+                const cappedWf = Math.min(wf, totalLineFrames - elapsedFrames - (numWords - step));
+                const finalWf = Math.max(1, cappedWf);
+                wordFramesList.push(finalWf);
+                elapsedFrames += finalWf;
               }
             }
           }
@@ -2402,6 +2367,10 @@ export async function generateBratVideoMp4({
               }
             }
 
+            if (transitions.length >= wordFrames) {
+              transitions = transitions.slice(0, Math.max(0, wordFrames - 1));
+            }
+
             for (let t = 0; t < transitions.length; t++) {
               const tr = transitions[t];
               const frameBg = tr.factor < 1.0
@@ -2451,6 +2420,10 @@ export async function generateBratVideoMp4({
             ];
           }
 
+          if (lineTransitions.length >= totalLineFrames) {
+            lineTransitions = lineTransitions.slice(0, Math.max(0, totalLineFrames - 1));
+          }
+
           for (let t = 0; t < lineTransitions.length; t++) {
             const tr = lineTransitions[t];
             const frameBg = interpolateHexColor(prevLayerBg, curTheme.bg, tr.factor);
@@ -2483,6 +2456,29 @@ export async function generateBratVideoMp4({
           const linePath = path.join(tmpDir, `base_line_${i}.png`);
           await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
           pushFrame(linePath, solidFrames);
+        }
+
+        // Jika ada jeda hening/instrumental sebelum baris berikutnya, tahan teks baris ini hingga baris berikutnya mulai
+        if (next) {
+          const expectedNextStart = Math.round((next.time - startTime) * 24);
+          if (globalFrameCount < expectedNextStart) {
+            const gapHoldFrames = expectedNextStart - globalFrameCount;
+            const holdPath = path.join(tmpDir, `gap_hold_${i}.png`);
+            if (!fs.existsSync(holdPath)) {
+              const holdSvg = renderBratSvg(
+                lineLayout,
+                lineLayout.positionedWords,
+                -1,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9
+              );
+              await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+            }
+            pushFrame(holdPath, gapHoldFrames);
+          }
         }
 
         prevLayerBg = curTheme.bg;
@@ -2531,17 +2527,18 @@ export async function generateBratVideoMp4({
       const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / 24;
       let safeStartTime = startTime;
-      if (audioDuration > 0 && safeStartTime + totalDuration > audioDuration) {
+      if (audioDuration > 0 && audioDuration > totalDuration + 2 && safeStartTime + totalDuration > audioDuration) {
         safeStartTime = Math.max(0, audioDuration - totalDuration);
       }
 
       const fadeDuration = 0.8;
       const fadeStart = Math.max(0, totalDuration - fadeDuration);
+      const fadeInDuration = isFastRapSong ? 0.02 : 0.08;
 
       const outMp4 = path.join(tmpDir, 'output.mp4');
       const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
-        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=0.25,afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -accurate_seek -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=${fadeInDuration.toFixed(3)},afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
         { timeout: ffmpegTimeout }
       );
 
