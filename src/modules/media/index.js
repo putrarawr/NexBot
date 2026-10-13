@@ -1417,12 +1417,12 @@ export function estimateWordWeight(word, isLast = false) {
 
 export function getAudioDuration(audioPath) {
   try {
-    const out = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, {
+    const out = execSync(`ffprobe -v error -show_entries format=duration:stream=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, {
       encoding: 'utf-8',
       timeout: 10000,
     });
-    const dur = parseFloat(out.trim());
-    return !isNaN(dur) && dur > 0 ? dur : 0;
+    const lines = out.split(/\r?\n/).map((l) => parseFloat(l.trim())).filter((d) => !isNaN(d) && d > 0);
+    return lines.length > 0 ? Math.max(...lines) : 0;
   } catch {
     return 0;
   }
@@ -2007,35 +2007,19 @@ export function selectLrcWindow(segments, {
       }
     }
     startIndex = rapIdx;
-    partLabel = 'Bagian Rap / Verse Cepat (30s)';
-  } else if (isReff || preferViral) {
-    const textCounts = new Map();
-    segments.forEach((s) => {
-      const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      if (clean.length > 5) {
-        textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
-      }
-    });
-
-    const totalSongDuration = segments[segments.length - 1].time;
-    const minReffTime = totalSongDuration * 0.18;
-    let bestReffIdx = -1;
-
-    for (let i = 0; i < segments.length; i++) {
-      const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
-        bestReffIdx = i;
-        break;
+    if (startIndex > 0) {
+      const prev = segments[startIndex - 1];
+      const prevDur = Math.max(0.4, segments[startIndex].time - prev.time);
+      const prevWords = (prev.text || '').trim().split(/\s+/).length;
+      if ((prevWords / prevDur) >= 3.8 && prevDur <= 2.2) {
+        startIndex = startIndex - 1;
       }
     }
-
-    if (bestReffIdx !== -1) {
-      startIndex = bestReffIdx;
-      partLabel = 'Reff / Chorus (30s)';
-    } else {
-      // Jika lirik tidak berulang persis, periksa apakah ada flow rap cepat
-      let highestWps = 0;
-      let rapIdx = -1;
+    partLabel = 'Bagian Rap / Verse Cepat (30s)';
+  } else if (isReff || preferViral) {
+    let fastRapCandidate = -1;
+    let peakRapWps = 0;
+    if (preferViral && !isReff) {
       for (let i = 0; i < segments.length - 1; i++) {
         const curWindow = Math.min(3, segments.length - i);
         let totalWords = 0;
@@ -2047,19 +2031,77 @@ export function selectLrcWindow(segments, {
           : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
         const dur = Math.max(1.0, endTime - segments[i].time);
         const wps = totalWords / dur;
-        if (wps > highestWps && segments[i].time > 8 && totalWords >= 8) {
-          highestWps = wps;
-          rapIdx = i;
+        if (wps > peakRapWps && segments[i].time > 8 && totalWords >= 10) {
+          peakRapWps = wps;
+          fastRapCandidate = i;
+        }
+      }
+    }
+
+    if (peakRapWps >= 5.5 && fastRapCandidate !== -1) {
+      startIndex = fastRapCandidate;
+      if (startIndex > 0) {
+        const prev = segments[startIndex - 1];
+        const prevDur = Math.max(0.4, segments[startIndex].time - prev.time);
+        const prevWords = (prev.text || '').trim().split(/\s+/).length;
+        if ((prevWords / prevDur) >= 3.8 && prevDur <= 2.2) {
+          startIndex = startIndex - 1;
+        }
+      }
+      partLabel = 'Bagian Rap / Verse Viral (30s)';
+    } else {
+      const textCounts = new Map();
+      segments.forEach((s) => {
+        const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+        if (clean.length > 5) {
+          textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
+        }
+      });
+
+      const totalSongDuration = segments[segments.length - 1].time;
+      const minReffTime = totalSongDuration * 0.18;
+      let bestReffIdx = -1;
+
+      for (let i = 0; i < segments.length; i++) {
+        const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+        if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
+          bestReffIdx = i;
+          break;
         }
       }
 
-      if (highestWps >= 4.0 && rapIdx !== -1) {
-        startIndex = rapIdx;
-        partLabel = 'Bagian Rap / Verse Cepat (30s)';
+      if (bestReffIdx !== -1) {
+        startIndex = bestReffIdx;
+        partLabel = 'Reff / Chorus (30s)';
       } else {
-        const targetTime = totalSongDuration * 0.30;
-        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
-        partLabel = 'Bagian Viral / Puncak Lagu (30s)';
+        // Jika lirik tidak berulang persis, periksa apakah ada flow rap cepat
+        let highestWps = 0;
+        let rapIdx = -1;
+        for (let i = 0; i < segments.length - 1; i++) {
+          const curWindow = Math.min(3, segments.length - i);
+          let totalWords = 0;
+          for (let w = 0; w < curWindow; w++) {
+            totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
+          }
+          const endTime = (i + curWindow < segments.length)
+            ? segments[i + curWindow].time
+            : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
+          const dur = Math.max(1.0, endTime - segments[i].time);
+          const wps = totalWords / dur;
+          if (wps > highestWps && segments[i].time > 8 && totalWords >= 8) {
+            highestWps = wps;
+            rapIdx = i;
+          }
+        }
+
+        if (highestWps >= 4.0 && rapIdx !== -1) {
+          startIndex = rapIdx;
+          partLabel = 'Bagian Rap / Verse Cepat (30s)';
+        } else {
+          const targetTime = totalSongDuration * 0.30;
+          startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+          partLabel = 'Bagian Viral / Puncak Lagu (30s)';
+        }
       }
     }
   }
@@ -2238,24 +2280,19 @@ export async function generateBratVideoMp4({
       const firstLineTheme = getLayerTheme(0, theme);
       let prevLayerBg = firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff';
 
-      // Jika ada jeda instrumental di awal (misal isFull atau -intro), tahan teks lirik baris pertama tanpa kartu judul/artis
+      // Jika ada jeda instrumental di awal (misal isFull atau -intro), tampilkan frame bersih sebelum vokal pertama masuk
       const introDuration = activeSegments[0].time - startTime;
       if (introDuration > 0.05) {
         const introFrames = Math.max(1, Math.round(introDuration * 24));
         const firstLineText = activeSegments[0].text + (theme ? ` ${theme}` : '');
         const firstLayout = computeBratLayout(firstLineText);
-        const holdSvg = renderBratSvg(
-          firstLayout,
-          firstLayout.positionedWords,
-          -1,
-          0.85,
-          0.0,
-          firstLineTheme.bg,
-          firstLineTheme.textColor,
-          0.9
-        );
+        const cleanIntroSvg = `
+          <svg width="${firstLayout.canvasSize}" height="${firstLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
+            <rect width="100%" height="100%" fill="${firstLineTheme.bg}" />
+          </svg>
+        `;
         const holdPath = path.join(tmpDir, 'intro_hold.png');
-        await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+        await sharp(Buffer.from(cleanIntroSvg)).png().toFile(holdPath);
         pushFrame(holdPath, introFrames);
         prevLayerBg = firstLineTheme.bg;
       }
@@ -2316,15 +2353,18 @@ export async function generateBratVideoMp4({
             const usedSoFar = wordFramesList.reduce((a, b) => a + b, 0);
             wordFramesList.push(Math.max(1, totalLineFrames - usedSoFar));
           } else {
-            // Path 2: Fallback berbasis bobot suku kata dengan alokasi jendela aktif menyanyi
+            // Path 2: Alokasi proporsional bobot suku kata terhadap durasi vokal baris
             const lineDur = totalLineFrames / 24;
             const lineWps = numWords / Math.max(0.4, lineDur);
             const isLineRapFlow = isFastRapSong || isRap || lineWps >= 3.8;
 
-            // Cadence kata per detik: aliran rap cepat ~4.8 wps, lagu normal ~2.6 wps
-            const cadenceWps = isLineRapFlow ? 4.8 : 2.6;
-            const naturalVocalFrames = Math.max(numWords, Math.round((numWords / cadenceWps) * 24));
-            const vocalFrames = Math.min(totalLineFrames, naturalVocalFrames);
+            // Alokasikan jeda alami sebelum baris berikutnya dimulai:
+            // - Lagu normal: jeda napas/ketukan ~15% (maks 0.45s / 11 frame)
+            // - Rap cepat / flow rapat: jeda sangat tipis ~6% (maks 0.15s / 3 frame)
+            const pauseFrames = isLineRapFlow
+              ? Math.min(Math.round(totalLineFrames * 0.06), 3)
+              : Math.min(Math.round(totalLineFrames * 0.15), 11);
+            const vocalFrames = Math.max(numWords, totalLineFrames - pauseFrames);
 
             const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
               const isLast = idx === numWords - 1;
@@ -2563,9 +2603,13 @@ export async function generateBratVideoMp4({
 
       const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / 24;
-      let safeStartTime = startTime;
-      if (audioDuration > 0 && safeStartTime + totalDuration > audioDuration) {
-        safeStartTime = Math.max(0, audioDuration - totalDuration);
+      let safeStartTime = Math.max(0, startTime);
+      if (audioDuration > 0) {
+        if (safeStartTime >= audioDuration) {
+          safeStartTime = Math.max(0, audioDuration - totalDuration);
+        } else if (safeStartTime + totalDuration > audioDuration) {
+          safeStartTime = Math.max(0, audioDuration - totalDuration);
+        }
       }
 
       const fadeDuration = 0.8;

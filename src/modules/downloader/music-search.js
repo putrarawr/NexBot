@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process';
+import { exec, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -217,8 +217,9 @@ export async function downloadMusicTrack(target, metadata = {}) {
           else if (diff <= 30) score += 10;
           else if (diff > 45) score -= 40;
 
-          if (/official (audio|video|music video)/i.test(title)) score += 30;
-          else if (/audio/i.test(title)) score += 15;
+          if (/official audio/i.test(title)) score += 35;
+          else if (/official (video|music video)/i.test(title)) score += (diff > 15 ? -25 : 15);
+          else if (/\baudio\b/i.test(title)) score += 20;
           if (metadata.artist && new RegExp(metadata.artist.replace(/[^a-z0-9]/gi, ''), 'i').test(title.replace(/[^a-z0-9]/gi, ''))) {
             score += 20;
           }
@@ -305,6 +306,25 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const downloadedFile = files.find((f) => f.endsWith('.mp3')) || files.find((f) => !f.endsWith('.part') && !f.endsWith('.ytdl')) || files[0];
   const downloadedPath = path.join(os.tmpdir(), downloadedFile);
   const stat = fs.statSync(downloadedPath);
+  if (stat.size < 50000) {
+    await safeUnlink(...files.map((f) => path.join(os.tmpdir(), f)));
+    throw new Error('File audio yang diunduh tidak lengkap atau rusak.');
+  }
+
+  if (metadata.targetDuration && Number(metadata.targetDuration) >= 60) {
+    try {
+      const probeOut = execSync(`ffprobe -v error -show_entries format=duration:stream=duration -of default=noprint_wrappers=1:nokey=1 "${downloadedPath}"`, { timeout: 10000 }).toString();
+      const durList = probeOut.split(/\r?\n/).map((l) => parseFloat(l.trim())).filter((d) => !isNaN(d) && d > 0);
+      const measuredDur = durList.length > 0 ? Math.max(...durList) : 0;
+      if (measuredDur > 0 && measuredDur < 45) {
+        await safeUnlink(...files.map((f) => path.join(os.tmpdir(), f)));
+        throw new Error('File audio yang diunduh adalah klip preview berdurasi terlalu pendek.');
+      }
+    } catch (probeErr) {
+      if (probeErr.message.includes('preview')) throw probeErr;
+    }
+  }
+
   const buffer = fs.readFileSync(downloadedPath);
   await safeUnlink(...files.map((f) => path.join(os.tmpdir(), f)));
 
