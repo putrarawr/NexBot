@@ -827,7 +827,7 @@ export function registerMediaCommands() {
         lyricSearch = lirikMatch[2].trim();
       }
 
-      let syncOffset = 0.00;
+      let syncOffset = 0.25;
       const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
       if (offsetMatch) {
         const parsedOffset = parseFloat(offsetMatch[1]);
@@ -1337,6 +1337,43 @@ function renderBratSvg(layout, visibleWords, activeIndex = -1, activeOpacity = 1
   `;
 }
 
+export function estimateWordWeight(word, isLast = false) {
+  if (!word || typeof word !== 'string') return 1.0;
+  const clean = word.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!clean) return 1.0;
+
+  // Hitung jumlah kluster vokal (aproksimasi suku kata vokal lagu)
+  const vowelMatches = clean.match(/[aeiouy]+/g);
+  const syllables = vowelMatches ? vowelMatches.length : 1;
+
+  // Bobot dasar suku kata (suku kata lebih banyak = durasi nada vokal lebih panjang)
+  let weight = 1.0 + (syllables - 1) * 0.55;
+
+  // Kata yang panjang butuh artikulasi artikulatoris lebih lama
+  if (clean.length > 5) weight += 0.25;
+
+  // Tanda baca (koma, titik, tanda tanya, seru, dash) menandakan nada ditahan / jeda frase
+  if (/[,.\-!?;:~]$/.test(word.trim())) {
+    weight += 0.5;
+  }
+
+  // Kata tugas / preposisi pendek biasanya nada lewat (passing note) yang cepat
+  const passingWords = new Set([
+    'a', 'an', 'the', 'to', 'in', 'on', 'at', 'of', 'and', 'or', 'is', 'it', 'my',
+    'dan', 'di', 'ke', 'yg', 'yang', 'si', 'se', 'ini', 'itu', 'tak', 'kan',
+  ]);
+  if (passingWords.has(clean) && !isLast) {
+    weight = Math.max(0.75, weight * 0.75);
+  }
+
+  // Kata terakhir di akhir baris hampir selalu nada panjang / sustain melodi
+  if (isLast) {
+    weight += 0.65;
+  }
+
+  return weight;
+}
+
 export function getAudioDuration(audioPath) {
   try {
     const out = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, {
@@ -1672,7 +1709,7 @@ export async function generateBratVideoMp4({
   lyricSearch = '',
   isLineMode = false,
   isTypingEffect = false,
-  syncOffset = 0.00,
+  syncOffset = 0.25,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1729,17 +1766,28 @@ export async function generateBratVideoMp4({
       const startTime = windowInfo.startTime;
       const partLabel = windowInfo.partLabel;
 
-      const concatEntries = [];
-      let frameCounter = 0;
+      let globalFrameCount = 0;
+      function pushFrame(imagePath, count = 1) {
+        for (let c = 0; c < count; c++) {
+          globalFrameCount++;
+          const target = path.join(tmpDir, `frame_${String(globalFrameCount).padStart(5, '0')}.png`);
+          try {
+            fs.linkSync(imagePath, target);
+          } catch {
+            fs.copyFileSync(imagePath, target);
+          }
+        }
+      }
 
       const introDuration = activeSegments[0].time - startTime;
       if (introDuration > 0.05) {
+        const introFrames = Math.max(1, Math.round(introDuration * 24));
         const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
         const introLayout = computeBratLayout(introText);
         const introSvg = renderBratSvg(introLayout, introLayout.positionedWords);
-        const introPath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+        const introPath = path.join(tmpDir, 'base_intro.png');
         await sharp(Buffer.from(introSvg)).png().toFile(introPath);
-        concatEntries.push({ file: introPath, duration: introDuration.toFixed(3) });
+        pushFrame(introPath, introFrames);
       }
 
       for (let i = 0; i < activeSegments.length; i++) {
@@ -1747,97 +1795,89 @@ export async function generateBratVideoMp4({
         const next = activeSegments[i + 1];
         const rawSegDur = next ? next.time - cur.time : 4.0;
         const segDuration = next ? (isFull ? Math.max(0.5, rawSegDur) : Math.min(6.0, Math.max(0.5, rawSegDur))) : 4.0;
-        const lineText = cur.text + (theme ? ` ${theme}` : '');
+        const totalLineFrames = Math.max(6, Math.round(segDuration * 24));
+        const lineText = cur.text + (theme ? ` ${theme}` : "");
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
-        if (!isLineMode && numWords > 1 && segDuration >= 1.0) {
+        if (!isLineMode && numWords > 1 && totalLineFrames >= 20) {
           // Kata per kata muncul dengan kurva tempo alami dan animasi ease-out halus
-          const pauseDur = Math.min(0.4, Math.max(0.15, segDuration * 0.08));
-          const activeVocal = segDuration - pauseDur;
-          const wordWeights = lineLayout.positionedWords.map((pw) => {
-            const letters = pw.word.replace(/[^a-zA-Z0-9]/g, '').length;
-            return 1.0 + Math.min(1.2, letters * 0.18);
+          const pauseFrames = Math.min(8, Math.max(2, Math.round(totalLineFrames * 0.07)));
+          const vocalFrames = totalLineFrames - pauseFrames;
+
+          const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
+            const isLast = idx === numWords - 1;
+            return estimateWordWeight(pw.word, isLast);
           });
           const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
 
-          let elapsedDuration = 0;
+          let elapsedFrames = 0;
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
             const activeIdx = step - 1;
 
-            let dur;
+            let wordFrames;
             if (step === numWords) {
-              dur = Math.max(0.2, segDuration - elapsedDuration);
+              wordFrames = Math.max(3, totalLineFrames - elapsedFrames);
             } else {
-              dur = Math.max(0.14, (activeVocal * wordWeights[activeIdx]) / totalWeight);
-              elapsedDuration += dur;
+              wordFrames = Math.max(3, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
+              elapsedFrames += wordFrames;
             }
 
-            // Animasi smooth multi-frame ease-out (opacity 0.35 -> 0.75 -> 1.00 & rise 2.5px -> 1.0px -> 0px)
-            if (dur >= 0.22) {
-              const t1 = 0.042;
-              const t2 = 0.042;
-              const tSolid = dur - t1 - t2;
-
-              const svg1 = renderBratSvg(lineLayout, visible, activeIdx, 0.35, 2.5);
-              const p1 = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svg1)).png().toFile(p1);
-              concatEntries.push({ file: p1, duration: t1.toFixed(3) });
-
-              const svg2 = renderBratSvg(lineLayout, visible, activeIdx, 0.75, 1.0);
-              const p2 = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svg2)).png().toFile(p2);
-              concatEntries.push({ file: p2, duration: t2.toFixed(3) });
-
-              const svg3 = renderBratSvg(lineLayout, visible, activeIdx, 1.0, 0.0);
-              const p3 = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svg3)).png().toFile(p3);
-              concatEntries.push({ file: p3, duration: tSolid.toFixed(3) });
-            } else if (dur >= 0.14) {
-              const t1 = 0.042;
-              const tSolid = dur - t1;
-
-              const svg1 = renderBratSvg(lineLayout, visible, activeIdx, 0.50, 1.5);
-              const p1 = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svg1)).png().toFile(p1);
-              concatEntries.push({ file: p1, duration: t1.toFixed(3) });
-
-              const svg2 = renderBratSvg(lineLayout, visible, activeIdx, 1.0, 0.0);
-              const p2 = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svg2)).png().toFile(p2);
-              concatEntries.push({ file: p2, duration: tSolid.toFixed(3) });
+            // Animasi smooth multi-frame ease-out (gliding upward + opacity fade-in)
+            let transitions = [];
+            if (wordFrames >= 8) {
+              transitions = [
+                { op: 0.20, dy: 7.5 },
+                { op: 0.55, dy: 3.8 },
+                { op: 0.82, dy: 1.5 },
+                { op: 0.95, dy: 0.4 },
+              ];
+            } else if (wordFrames >= 5) {
+              transitions = [
+                { op: 0.30, dy: 6.0 },
+                { op: 0.70, dy: 2.2 },
+                { op: 0.92, dy: 0.6 },
+              ];
+            } else if (wordFrames >= 3) {
+              transitions = [
+                { op: 0.45, dy: 4.0 },
+                { op: 0.85, dy: 1.2 },
+              ];
             } else {
-              const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0, 0.0);
-              const pSolid = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-              await sharp(Buffer.from(svgSolid)).png().toFile(pSolid);
-              concatEntries.push({ file: pSolid, duration: dur.toFixed(3) });
+              transitions = [
+                { op: 0.65, dy: 2.0 },
+              ];
             }
+
+            for (let t = 0; t < transitions.length; t++) {
+              const tr = transitions[t];
+              const trSvg = renderBratSvg(lineLayout, visible, activeIdx, tr.op, tr.dy);
+              const trPath = path.join(tmpDir, `base_w${i}_${step}_tr${t}.png`);
+              await sharp(Buffer.from(trSvg)).png().toFile(trPath);
+              pushFrame(trPath, 1);
+            }
+
+            const solidFrames = Math.max(1, wordFrames - transitions.length);
+            const solidSvg = renderBratSvg(lineLayout, visible, activeIdx, 1.0, 0.0);
+            const solidPath = path.join(tmpDir, `base_w${i}_${step}_solid.png`);
+            await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
+            pushFrame(solidPath, solidFrames);
           }
         } else {
           // Mode baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
-          const svg = renderBratSvg(lineLayout, lineLayout.positionedWords);
-          const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-          await sharp(Buffer.from(svg)).png().toFile(framePath);
-          concatEntries.push({ file: framePath, duration: segDuration.toFixed(3) });
+          const lineSvg = renderBratSvg(lineLayout, lineLayout.positionedWords);
+          const linePath = path.join(tmpDir, `base_line_${i}.png`);
+          await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
+          pushFrame(linePath, totalLineFrames);
         }
       }
 
-      const totalDuration = concatEntries.reduce((acc, e) => acc + parseFloat(e.duration), 0);
-      const listPath = path.join(tmpDir, 'list.txt');
-      const lines = [];
-      concatEntries.forEach((e) => {
-        lines.push(`file '${e.file}'`);
-        lines.push(`duration ${e.duration}`);
-      });
-      lines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
-      fs.writeFileSync(listPath, lines.join('\n'));
-
-      // Muxing langsung dalam satu pass dengan presisi sample audio & video
+      const totalDuration = globalFrameCount / 24;
       const outMp4 = path.join(tmpDir, 'output.mp4');
       const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
-        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -shortest -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -shortest -movflags +faststart "${outMp4}"`,
         { timeout: ffmpegTimeout }
       );
 

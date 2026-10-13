@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -368,6 +368,10 @@ async function runAllTests() {
 
     const lrcOffset0 = parseLrcLyrics('[00:01.50] baris lirik satu', 0.0);
     assert.equal(lrcOffset0[0].time, 1.50);
+
+    const wPassing = estimateWordWeight('the', false);
+    const wMulti = estimateWordWeight('berdiri', true);
+    assert.ok(wMulti > wPassing, 'Multi-syllable sustained word must have higher weight than passing word');
 
     const sampleSegments = [
       { time: 5, text: 'intro verse satu' },
