@@ -741,6 +741,43 @@ export function registerMediaCommands() {
       }
     },
   });
+
+  // 17. Command: Brat Video / Animated Sticker Generator (/bratvid)
+  registerCommand({
+    name: 'bratvid',
+    aliases: ['bratvideo', 'bratgif', 'bratv', 'vbrat'],
+    category: 'media',
+    description: 'Membuat stiker video animasi bergerak teks atau lirik lagu ala Brat',
+    usage: '/bratvid <teks atau lirik lagu> atau balas pesan dengan /bratvid',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx }) {
+      let text = fullText?.trim();
+
+      // Cek balas pesan di WhatsApp
+      const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!text && quoted) {
+        text = quoted.conversation || quoted.extendedTextMessage?.text || '';
+      }
+
+      // Cek balas pesan di Telegram
+      if (!text && ctx?.message?.reply_to_message) {
+        text = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '';
+      }
+
+      if (!text) {
+        return reply(`[!] Masukkan teks atau lirik lagu untuk stiker video Brat.\nContoh: <code>${prefix}bratvid kamu nanya tapi kamu ga dengerin</code>\natau balas pesan seseorang dengan <code>${prefix}bratvid</code>.`);
+      }
+
+      try {
+        const animWebp = await generateBratVideoSticker(text);
+        await sock.sendMessage(jid, {
+          sticker: animWebp,
+        });
+      } catch (err) {
+        logger.error('Error saat membuat stiker brat video:', err.message);
+        await reply(`[!] Gagal membuat stiker Brat Video: ${err.message}`);
+      }
+    },
+  });
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -866,7 +903,7 @@ function ensureSystemFontInstalled() {
   } catch {}
 }
 
-export async function generateBratSticker(text) {
+function computeBratLayout(text) {
   ensureSystemFontInstalled();
   const measure = getFontMeasure();
 
@@ -950,14 +987,19 @@ export async function generateBratSticker(text) {
   const totalBlockHeight = lines.length * lineHeight;
   const startY = (canvasSize - totalBlockHeight) / 2 + (fontSize * 0.82);
 
-  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
-  const textElements = [];
+  const positionedWords = [];
+  let globalWordIdx = 0;
 
   lines.forEach((lineWords, lineIdx) => {
     const y = startY + (lineIdx * lineHeight);
     if (lineWords.length === 1) {
-      textElements.push(`<text x="${canvasSize / 2}" y="${y.toFixed(2)}" text-anchor="middle" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fontSize}px" fill="${textColor}" filter="url(#bratBlur)">${escapeXml(lineWords[0])}</text>`);
+      positionedWords.push({
+        word: lineWords[0],
+        x: (canvasSize / 2).toFixed(2),
+        y: y.toFixed(2),
+        anchor: 'middle',
+        globalIdx: globalWordIdx++,
+      });
     } else {
       const wordWidths = lineWords.map((w) => measure(w, fontSize));
       const totalWordW = wordWidths.reduce((a, b) => a + b, 0);
@@ -966,20 +1008,46 @@ export async function generateBratSticker(text) {
 
       let curX = startX;
       lineWords.forEach((w, wIdx) => {
-        textElements.push(`<text x="${curX.toFixed(2)}" y="${y.toFixed(2)}" text-anchor="start" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fontSize}px" fill="${textColor}" filter="url(#bratBlur)">${escapeXml(w)}</text>`);
+        positionedWords.push({
+          word: w,
+          x: curX.toFixed(2),
+          y: y.toFixed(2),
+          anchor: 'start',
+          globalIdx: globalWordIdx++,
+        });
         curX += wordWidths[wIdx] + gap;
       });
     }
   });
 
+  return {
+    bg,
+    textColor,
+    canvasSize,
+    contentWidth,
+    fontSize,
+    lines,
+    positionedWords,
+    rawText: raw,
+  };
+}
+
+export async function generateBratSticker(text) {
+  const layout = computeBratLayout(text);
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const textElements = layout.positionedWords.map((pw) =>
+    `<text x="${pw.x}" y="${pw.y}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`
+  );
+
   const svg = `
-    <svg width="${canvasSize}" height="${canvasSize}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="${layout.canvasSize}" height="${layout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <filter id="bratBlur" x="-10%" y="-10%" width="120%" height="120%">
           <feGaussianBlur stdDeviation="0.9" />
         </filter>
       </defs>
-      <rect width="100%" height="100%" fill="${bg}" />
+      <rect width="100%" height="100%" fill="${layout.bg}" />
       ${textElements.join('\n      ')}
     </svg>
   `;
@@ -988,6 +1056,74 @@ export async function generateBratSticker(text) {
     .webp({ quality: 95 })
     .toBuffer();
   return await addStickerExif(rawWebp, { pack: 'NexusBot', author: 'nexusbot' });
+}
+
+export async function generateBratVideoSticker(text) {
+  const layout = computeBratLayout(text);
+  const numSteps = layout.positionedWords.length;
+
+  if (numSteps <= 1) {
+    return await generateBratSticker(text);
+  }
+
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nex_bratvid_'));
+  const frameFiles = [];
+
+  try {
+    for (let step = 1; step <= numSteps; step++) {
+      const visibleWords = layout.positionedWords.slice(0, step);
+      const textElements = visibleWords.map((pw) =>
+        `<text x="${pw.x}" y="${pw.y}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`
+      );
+
+      const svg = `
+        <svg width="${layout.canvasSize}" height="${layout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="bratBlur" x="-10%" y="-10%" width="120%" height="120%">
+              <feGaussianBlur stdDeviation="0.9" />
+            </filter>
+          </defs>
+          <rect width="100%" height="100%" fill="${layout.bg}" />
+          ${textElements.join('\n          ')}
+        </svg>
+      `;
+
+      const framePath = path.join(tmpDir, `frame_${String(step).padStart(3, '0')}.png`);
+      await sharp(Buffer.from(svg)).png().toFile(framePath);
+      frameFiles.push(framePath);
+    }
+
+    const typeDuration = Math.min(3.2, Math.max(1.2, numSteps * 0.22));
+    const stepDuration = Math.max(0.12, typeDuration / numSteps).toFixed(3);
+    const holdDuration = 1.6;
+
+    const concatLines = [];
+    frameFiles.forEach((f, idx) => {
+      concatLines.push(`file '${f}'`);
+      if (idx === frameFiles.length - 1) {
+        concatLines.push(`duration ${holdDuration}`);
+      } else {
+        concatLines.push(`duration ${stepDuration}`);
+      }
+    });
+    concatLines.push(`file '${frameFiles[frameFiles.length - 1]}'`);
+
+    const listPath = path.join(tmpDir, 'list.txt');
+    fs.writeFileSync(listPath, concatLines.join('\n'));
+
+    const outWebp = path.join(tmpDir, 'anim.webp');
+    execSync(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -vcodec libwebp -filter:v "scale=512:512,fps=10" -loop 0 -an "${outWebp}"`, {
+      timeout: 30000,
+    });
+
+    const animBuffer = fs.readFileSync(outWebp);
+    return await addStickerExif(animBuffer, { pack: 'NexusBot', author: 'nexusbot' });
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 export async function generateTtsAudio(text, lang = 'id') {
