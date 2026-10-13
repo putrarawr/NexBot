@@ -886,11 +886,13 @@ export function registerMediaCommands() {
       }
 
       try {
+        let lyricsData = null;
         if (!isSongMode && !isExplicitText && !quotedAudio && cleanedText) {
           try {
             const detectedLyrics = await fetchSongLyricsWithSync(cleanedText);
             if (detectedLyrics?.syncedLyrics) {
               isSongMode = true;
+              lyricsData = detectedLyrics;
             }
           } catch {}
         }
@@ -899,6 +901,7 @@ export function registerMediaCommands() {
           await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik untuk "${cleanedText}"...`);
           const result = await generateBratVideoMp4({
             songQuery: cleanedText,
+            lyricsData,
             theme,
             isFull,
             isReff,
@@ -1909,6 +1912,19 @@ export function selectLrcWindow(segments, {
     }
   }
 
+  const isExplicitTarget = isFull || isRap || isIntro || fromTime !== null || !!lyricSearch;
+  if (!isExplicitTarget && startIndex > 0 && segments.length > 3) {
+    const lastTime = segments[segments.length - 1].time;
+    const remainingTime = lastTime - segments[startIndex].time;
+    if (remainingTime < 18) {
+      let newIdx = startIndex;
+      while (newIdx > 0 && lastTime - segments[newIdx].time < 28) {
+        newIdx--;
+      }
+      startIndex = newIdx;
+    }
+  }
+
   const selectedFirst = segments[startIndex] || segments[0];
   let startTime = 0;
   if (isFull) {
@@ -1935,6 +1951,17 @@ export function selectLrcWindow(segments, {
     }
   }
 
+  if (!isExplicitTarget && activeSegments.length < 3 && segments.length >= 3 && startIndex > 0) {
+    startIndex = Math.max(0, startIndex - 2);
+    activeSegments = [];
+    for (let i = startIndex; i < segments.length; i++) {
+      activeSegments.push(segments[i]);
+      if (segments[i].time - segments[startIndex].time >= maxDuration) {
+        break;
+      }
+    }
+  }
+
   if (activeSegments.length === 0) activeSegments.push(selectedFirst);
 
   return {
@@ -1950,6 +1977,7 @@ export async function generateBratVideoMp4({
   text = '',
   audioBuffer = null,
   songQuery = '',
+  lyricsData: initialLyricsData = null,
   theme = '',
   isFull = false,
   isReff = false,
@@ -1964,9 +1992,9 @@ export async function generateBratVideoMp4({
   isCustomOffset = false,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
-  if (songQuery) {
-    const cleanQuery = songQuery.trim();
-    const lyricsData = await fetchSongLyricsWithSync(cleanQuery);
+  if (songQuery || initialLyricsData) {
+    const cleanQuery = (songQuery || '').trim();
+    const lyricsData = initialLyricsData || (await fetchSongLyricsWithSync(cleanQuery));
     if (!lyricsData) {
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
@@ -1998,13 +2026,13 @@ export async function generateBratVideoMp4({
     const searchTarget = `${lyricsData.artistName} - ${lyricsData.trackName}`;
     let musicTrack = null;
     try {
-      musicTrack = await downloadMusicTrack(`ytsearch1:${searchTarget} audio`, {
+      musicTrack = await downloadMusicTrack(searchTarget, {
         targetDuration: lyricsData.duration,
         title: lyricsData.trackName,
         artist: lyricsData.artistName,
       });
     } catch {
-      musicTrack = await downloadMusicTrack(`ytsearch1:${cleanQuery} audio`, {
+      musicTrack = await downloadMusicTrack(cleanQuery, {
         targetDuration: lyricsData.duration,
       });
     }
@@ -2176,11 +2204,17 @@ export async function generateBratVideoMp4({
         }
       }
 
+      const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / 24;
+      let safeStartTime = startTime;
+      if (audioDuration > 0 && safeStartTime + totalDuration > audioDuration) {
+        safeStartTime = Math.max(0, audioDuration - totalDuration);
+      }
+
       const outMp4 = path.join(tmpDir, 'output.mp4');
       const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
-        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -shortest -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
         { timeout: ffmpegTimeout }
       );
 

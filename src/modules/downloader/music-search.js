@@ -179,11 +179,12 @@ export async function downloadMusicTrack(target, metadata = {}) {
     }
   }
 
-  const isSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
-  if (metadata.targetDuration && !isSearchPrefixed && !isDirectMediaUrl) {
+  const isGenericSearch = !isDirectMediaUrl;
+  if (metadata.targetDuration && isGenericSearch) {
     try {
       const safeDuration = Number(metadata.targetDuration);
-      const searchTargetCand = `ytsearch5:${searchTerm} audio`;
+      const cleanTerm = searchTerm.replace(/^(ytsearch\d*:|scsearch\d*:)/i, '').replace(/\baudio\b/gi, '').trim();
+      const searchTargetCand = `ytsearch6:${cleanTerm} audio`;
       const printTemplate = '%(id)s\t%(duration)s';
       const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
       const { stdout: candOut } = await execAsync(candCmd, { timeout: 15000 });
@@ -193,7 +194,9 @@ export async function downloadMusicTrack(target, metadata = {}) {
       for (const line of candLines) {
         const [id, durStr] = line.split('\t');
         const d = parseFloat(durStr);
-        if (id && !isNaN(d)) {
+        if (id && !isNaN(d) && d > 0) {
+          // Abaikan video pendek (Shorts) jika lagu aslinya berdurasi panjang
+          if (safeDuration >= 90 && d < 60) continue;
           const diff = Math.abs(d - safeDuration);
           if (diff < minDiff) {
             minDiff = diff;
@@ -201,8 +204,8 @@ export async function downloadMusicTrack(target, metadata = {}) {
           }
         }
       }
-      if (bestId && minDiff <= 15) {
-        searchTerm = `ytsearch1:${bestId}`;
+      if (bestId && minDiff <= 35) {
+        searchTerm = `https://www.youtube.com/watch?v=${bestId}`;
       }
     } catch (e) {
       logger.debug('Target duration candidate lookup fallback:', e.message);
@@ -212,9 +215,11 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const rand = Math.random().toString(36).slice(2, 8);
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
   const resolvedSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
-  const searchTarget = resolvedSearchPrefixed ? searchTerm : `ytsearch1:${searchTerm} audio`;
+  const searchTarget = resolvedSearchPrefixed
+    ? searchTerm
+    : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} audio`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
-  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=ios,android,web,mweb" ';
+  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android,web" ';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
@@ -242,10 +247,11 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const files = fs.readdirSync(os.tmpdir()).filter((file) => file.startsWith('spot_') && file.includes(rand));
   if (files.length === 0) throw new Error('File audio tidak ditemukan.');
 
-  const downloadedPath = path.join(os.tmpdir(), files[0]);
+  const downloadedFile = files.find((f) => f.endsWith('.mp3')) || files.find((f) => !f.endsWith('.part') && !f.endsWith('.ytdl')) || files[0];
+  const downloadedPath = path.join(os.tmpdir(), downloadedFile);
   const stat = fs.statSync(downloadedPath);
   const buffer = fs.readFileSync(downloadedPath);
-  await safeUnlink(downloadedPath);
+  await safeUnlink(...files.map((f) => path.join(os.tmpdir(), f)));
 
   const resolvedTitle = metadata.title || spotifyMeta?.title || itunesMeta?.trackName || searchTerm;
   const resolvedArtist = metadata.artist || spotifyMeta?.author_name || itunesMeta?.artistName || 'Spotify Music';
