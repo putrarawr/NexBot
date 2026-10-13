@@ -366,8 +366,8 @@ async function runAllTests() {
     assert.equal(lrcOffset[0].text, 'baris lirik satu');
     assert.ok(!lrcOffset[0].text.includes('\u0000'));
 
-    const lrcOffset35 = parseLrcLyrics('[00:01.50] baris lirik satu', -0.35);
-    assert.equal(lrcOffset35[0].time, 1.15);
+    const lrcOffset45 = parseLrcLyrics('[00:01.50] baris lirik satu', -0.45);
+    assert.equal(lrcOffset45[0].time, 1.05);
 
     const sampleSegments = [
       { time: 5, text: 'intro verse satu' },
@@ -382,6 +382,13 @@ async function runAllTests() {
     const defWin = selectLrcWindow(sampleSegments, {});
     assert.equal(defWin.startTime, 0);
     assert.ok(defWin.activeSegments.length > 0);
+
+    const viralWin = selectLrcWindow(sampleSegments, { preferViral: true });
+    assert.ok(viralWin.activeSegments[0].text.includes('reff'));
+
+    const introWin = selectLrcWindow(sampleSegments, { isIntro: true });
+    assert.equal(introWin.startTime, 0);
+    assert.equal(introWin.activeSegments[0].text, 'intro verse satu');
 
     const fullWin = selectLrcWindow(sampleSegments, { isFull: true });
     assert.equal(fullWin.startTime, 0);

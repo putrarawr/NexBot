@@ -785,7 +785,7 @@ export function registerMediaCommands() {
   // 18. Command: Brat Video MP4 Generator (/bratmp4 / .bratmp4)
   registerCommand({
     name: 'bratmp4',
-    aliases: ['bratsong', 'bratlyric', 'bratmusic', 'vbratmp4', 'bratvmp4'],
+    aliases: ['bratsong', 'bratlyric', 'bratmusic', 'vbratmp4', 'bratvmp4', 'bratfull', 'bratmp4full'],
     category: 'media',
     description: 'Membuat video MP4 lirik lagu sinkron audio atau teks animasi ala Brat',
     usage: '/bratmp4 <judul lagu -song | teks kustom | balas audio>',
@@ -808,7 +808,9 @@ export function registerMediaCommands() {
       const hasSongFlag = /-song\b|-lagu\b/i.test(text);
       const isExplicitText = /-text\b|-teks\b/i.test(text);
 
-      const isFull = /-full\b|-lengkap\b|-semua\b/i.test(text);
+      const isIntro = /-intro\b|-awal\b|-depan\b/i.test(text);
+      const isFull = /-full\b|-lengkap\b|-semua\b|\bfull lirik\b|\blirik full\b/i.test(text) ||
+        command.toLowerCase() === 'bratfull' || command.toLowerCase() === 'bratmp4full';
       const isReff = /-reff\b|-chorus\b|-ref\b/i.test(text);
       const isRap = /-rap\b/i.test(text);
       const isLineMode = /-line\b|-solid\b/i.test(text);
@@ -825,7 +827,7 @@ export function registerMediaCommands() {
         lyricSearch = lirikMatch[2].trim();
       }
 
-      let syncOffset = -0.35;
+      let syncOffset = -0.45;
       const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
       if (offsetMatch) {
         const parsedOffset = parseFloat(offsetMatch[1]);
@@ -845,6 +847,8 @@ export function registerMediaCommands() {
         .replace(/-lagu\b/gi, '')
         .replace(/-text\b|-teks\b/gi, '')
         .replace(/-full\b|-lengkap\b|-semua\b/gi, '')
+        .replace(/\bfull lirik\b|\blirik full\b/gi, '')
+        .replace(/-intro\b|-awal\b|-depan\b/gi, '')
         .replace(/-reff\b|-chorus\b|-ref\b/gi, '')
         .replace(/-rap\b/gi, '')
         .replace(/-line\b|-solid\b/gi, '')
@@ -854,21 +858,22 @@ export function registerMediaCommands() {
         .replace(/-white\b/gi, '')
         .trim();
 
-      const hasSongSectionFlag = isFull || isReff || isRap || fromTime !== null || !!lyricSearch;
+      const hasSongSectionFlag = isFull || isReff || isRap || isIntro || fromTime !== null || !!lyricSearch;
       let isSongMode = (isSongCommand || hasSongFlag || hasSongSectionFlag) && !isExplicitText;
 
       if (!cleanedText && !quotedAudio) {
         return reply(
           `[!] Format penggunaan Brat Video MP4:\n\n` +
-          `1. Sinkron Lirik Lagu (Default 30 Detik, Kata per Kata):\n` +
-          `<code>${prefix}bratmp4 Fix You Coldplay</code> atau <code>${prefix}bratmp4 -song The Cure Boys Don't Cry -green</code>\n\n` +
-          `2. Request Bagian Lagu Tertentu:\n` +
+          `1. Sinkron Lirik Lagu (Default Otomatis Bagian Reff/Viral/Rap, Kata per Kata Smooth):\n` +
+          `<code>${prefix}bratmp4 Fix You Coldplay</code> atau <code>${prefix}bratmp4 The Cure Boys Don't Cry -green</code>\n\n` +
+          `2. Request Bagian Lagu:\n` +
+          `• Full Lirik Lagu: <code>${prefix}bratmp4 Judul Lagu -full</code> atau <code>${prefix}bratfull Judul Lagu</code>\n` +
           `• Reff/Chorus: <code>${prefix}bratmp4 Laskar Pelangi -reff</code>\n` +
           `• Bagian Rap: <code>${prefix}bratmp4 Eminem Godzilla -rap</code>\n` +
-          `• Full Lirik Lagu: <code>${prefix}bratmp4 Judul Lagu -full</code>\n` +
+          `• Dari awal mula/intro: <code>${prefix}bratmp4 Judul Lagu -intro</code>\n` +
           `• Menit tertentu: <code>${prefix}bratmp4 Judul Lagu -from 01:25</code>\n` +
           `• Teks baris utuh: <code>${prefix}bratmp4 Judul Lagu -line</code>\n` +
-          `• Penyesuaian delay: <code>${prefix}bratmp4 Judul Lagu -offset -0.3</code>\n\n` +
+          `• Penyesuaian delay: <code>${prefix}bratmp4 Judul Lagu -offset -0.5</code>\n\n` +
           `3. Balas Audio/Voice Note:\n` +
           `Balas pesan audio dengan <code>${prefix}bratmp4 baris satu / baris dua</code>\n\n` +
           `4. Video Teks Kustom:\n` +
@@ -894,6 +899,8 @@ export function registerMediaCommands() {
             isFull,
             isReff,
             isRap,
+            isIntro,
+            preferViral: !isIntro && !isFull && !isReff && !isRap && fromTime === null && !lyricSearch,
             fromTime,
             lyricSearch,
             isLineMode,
@@ -1308,10 +1315,14 @@ export async function generateBratVideoSticker(text) {
   }
 }
 
-function renderBratSvg(layout, visibleWords) {
-  const textElements = visibleWords.map((pw) =>
-    `<text x="${pw.x}" y="${pw.y}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`
-  );
+function renderBratSvg(layout, visibleWords, activeIndex = -1, activeOpacity = 1.0) {
+  const textElements = visibleWords.map((pw, idx) => {
+    const isNewest = idx === activeIndex;
+    const op = isNewest ? activeOpacity : 1.0;
+    const dy = isNewest && activeOpacity < 1.0 ? 1.5 : 0;
+    const yPos = parseFloat(pw.y) + dy;
+    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
+  });
 
   return `
     <svg width="${layout.canvasSize}" height="${layout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
@@ -1507,6 +1518,8 @@ export function selectLrcWindow(segments, {
   isFull = false,
   isReff = false,
   isRap = false,
+  isIntro = false,
+  preferViral = false,
   fromTime = null,
   lyricSearch = '',
   maxDuration = 35,
@@ -1542,6 +1555,55 @@ export function selectLrcWindow(segments, {
     const m = Math.floor(fromTime / 60);
     const s = Math.floor(fromTime % 60);
     partLabel = `Menit ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  } else if (isIntro) {
+    startIndex = 0;
+    partLabel = 'Awal Lagu / Intro (30s)';
+  } else if (isRap || (preferViral && !isReff)) {
+    let highestWps = 0;
+    let rapIdx = -1;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const dur = Math.max(1, segments[i + 1].time - segments[i].time);
+      const words = segments[i].text.trim().split(/\s+/).length;
+      const wps = words / dur;
+      if (wps > highestWps && segments[i].time > 8) {
+        highestWps = wps;
+        rapIdx = i;
+      }
+    }
+
+    if (isRap || (preferViral && highestWps >= 3.6 && rapIdx !== -1)) {
+      startIndex = Math.max(0, rapIdx);
+      partLabel = 'Bagian Rap / Verse Cepat (30s)';
+    } else if (preferViral) {
+      const textCounts = new Map();
+      segments.forEach((s) => {
+        const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+        if (clean.length > 5) {
+          textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
+        }
+      });
+
+      const totalSongDuration = segments[segments.length - 1].time;
+      const minReffTime = totalSongDuration * 0.20;
+      let bestReffIdx = -1;
+
+      for (let i = 0; i < segments.length; i++) {
+        const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+        if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
+          bestReffIdx = i;
+          break;
+        }
+      }
+
+      if (bestReffIdx !== -1) {
+        startIndex = bestReffIdx;
+        partLabel = 'Reff / Chorus Viral (30s)';
+      } else {
+        const targetTime = totalSongDuration * 0.30;
+        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+        partLabel = 'Bagian Viral / Puncak Lagu (30s)';
+      }
+    }
   } else if (isReff) {
     const textCounts = new Map();
     segments.forEach((s) => {
@@ -1570,20 +1632,6 @@ export function selectLrcWindow(segments, {
       startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
     }
     partLabel = 'Reff / Chorus (30s)';
-  } else if (isRap) {
-    let highestWps = 0;
-    let rapIdx = 0;
-    for (let i = 0; i < segments.length - 1; i++) {
-      const dur = Math.max(1, segments[i + 1].time - segments[i].time);
-      const words = segments[i].text.trim().split(/\s+/).length;
-      const wps = words / dur;
-      if (wps > highestWps && segments[i].time > 10) {
-        highestWps = wps;
-        rapIdx = i;
-      }
-    }
-    startIndex = rapIdx;
-    partLabel = 'Bagian Rap / Verse Cepat (30s)';
   }
 
   const selectedFirst = segments[startIndex] || segments[0];
@@ -1631,11 +1679,13 @@ export async function generateBratVideoMp4({
   isFull = false,
   isReff = false,
   isRap = false,
+  isIntro = false,
+  preferViral = false,
   fromTime = null,
   lyricSearch = '',
   isLineMode = false,
   isTypingEffect = false,
-  syncOffset = -0.35,
+  syncOffset = -0.45,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1681,6 +1731,8 @@ export async function generateBratVideoMp4({
         isFull,
         isReff,
         isRap,
+        isIntro,
+        preferViral,
         fromTime,
         lyricSearch,
         maxDuration: 35,
@@ -1712,8 +1764,7 @@ export async function generateBratVideoMp4({
         const numWords = lineLayout.positionedWords.length;
 
         if (!isLineMode && numWords > 1 && segDuration >= 1.0) {
-          // Default: Kata per kata muncul satu persatu sinkron dengan alunan vokal lagu
-          // Bobot durasi tiap kata proporsional terhadap panjang suku kata kata tersebut
+          // Default: Kata per kata muncul satu persatu dengan animasi smooth
           const vocalProportion = Math.min(0.85, Math.max(0.60, 0.45 + (numWords * 0.05)));
           const vocalDuration = Math.max(0.3, segDuration * vocalProportion);
           const wordWeights = lineLayout.positionedWords.map((pw) => Math.max(2, Math.min(8, pw.word.length)));
@@ -1722,18 +1773,36 @@ export async function generateBratVideoMp4({
           let elapsedDuration = 0;
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
-            const svg = renderBratSvg(lineLayout, visible);
-            const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
-            await sharp(Buffer.from(svg)).png().toFile(framePath);
+            const activeIdx = step - 1;
 
             let dur;
             if (step === numWords) {
               dur = Math.max(0.15, segDuration - elapsedDuration);
             } else {
-              dur = Math.max(0.08, (vocalDuration * wordWeights[step - 1]) / totalWeight);
+              dur = Math.max(0.08, (vocalDuration * wordWeights[activeIdx]) / totalWeight);
               elapsedDuration += dur;
             }
-            concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
+
+            // Animasi smooth: frame transisi fade-in (durasi 0.05s) diikuti frame solid
+            if (dur >= 0.16) {
+              const fadeDur = 0.05;
+              const solidDur = dur - fadeDur;
+
+              const svgFade = renderBratSvg(lineLayout, visible, activeIdx, 0.45);
+              const pathFade = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+              await sharp(Buffer.from(svgFade)).png().toFile(pathFade);
+              concatEntries.push({ file: pathFade, duration: fadeDur.toFixed(3) });
+
+              const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0);
+              const pathSolid = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+              await sharp(Buffer.from(svgSolid)).png().toFile(pathSolid);
+              concatEntries.push({ file: pathSolid, duration: solidDur.toFixed(3) });
+            } else {
+              const svgSolid = renderBratSvg(lineLayout, visible, activeIdx, 1.0);
+              const pathSolid = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+              await sharp(Buffer.from(svgSolid)).png().toFile(pathSolid);
+              concatEntries.push({ file: pathSolid, duration: dur.toFixed(3) });
+            }
           }
         } else {
           // Mode baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
@@ -1756,9 +1825,10 @@ export async function generateBratVideoMp4({
 
       // Muxing langsung dalam satu pass dengan presisi sample audio & video
       const outMp4 = path.join(tmpDir, 'output.mp4');
+      const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
         `ffmpeg -y -f concat -safe 0 -i "${listPath}" -ss ${startTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -shortest -movflags +faststart "${outMp4}"`,
-        { timeout: 60000 }
+        { timeout: ffmpegTimeout }
       );
 
       return {
