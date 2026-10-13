@@ -1515,6 +1515,14 @@ export function extractCleanTrackTitle(rawTrack) {
     .trim();
 }
 
+export function hasNonFeatSubtitle(rawTrack) {
+  const withoutFeat = String(rawTrack || '')
+    .replace(/\s*[\(\[](?:feat|ft|with)\b.*?[\]\)]/gi, '')
+    .replace(/\s*[-–—]\s*(?:feat|ft|with)\b.*/gi, '')
+    .trim();
+  return /\(.*?\)|\[.*?\]/.test(withoutFeat);
+}
+
 export function normalizeFuzzy(str) {
   return String(str || '').toLowerCase().replace(/!/g, 'i').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -1563,6 +1571,14 @@ export async function fetchSongLyricsWithSync(query) {
         const normArtist = normalizeFuzzy(item.artistName);
         const combinedText = `${rawTrack} ${item.artistName || ''}`.toLowerCase();
 
+        // Utamakan lagu asli tanpa subtitle/remix/refix dibanding versi alternatif
+        const subtitlePresent = hasNonFeatSubtitle(rawTrack);
+        if (!subtitlePresent) {
+          score += 45;
+        } else {
+          score -= 45;
+        }
+
         let trackMatches = 0;
         let artistMatches = 0;
         for (const tok of searchTokens) {
@@ -1595,7 +1611,7 @@ export async function fetchSongLyricsWithSync(query) {
           if (normArtist.includes(normalizeFuzzy(userCand2.artist))) score += 35;
         }
 
-        const modifiers = ['lofi', 'remix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
+        const modifiers = ['lofi', 'remix', 'refix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
         for (const mod of modifiers) {
           if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combinedText)) {
             score -= 55;
@@ -1782,8 +1798,16 @@ export async function fetchSongLyricsWithSync(query) {
       const normItemArtist = normalizeFuzzy(item.artistName);
       const combined = `${rawItemTrack} ${item.artistName || ''}`.toLowerCase();
 
+      // Utamakan lagu asli tanpa subtitle/remix/refix
+      const subtitlePresent = hasNonFeatSubtitle(rawItemTrack);
+      if (!subtitlePresent) {
+        score += 35;
+      } else {
+        score -= 45;
+      }
+
       // Penalti cover, karaoke, remix
-      const modifiers = ['lofi', 'remix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
+      const modifiers = ['lofi', 'remix', 'refix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
       for (const mod of modifiers) {
         if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combined)) {
           score -= 60;

@@ -187,7 +187,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
       const searchTargetCand = `ytsearch6:${cleanTerm} audio`;
       const printTemplate = '%(id)s\t%(duration)s';
       const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
-      const { stdout: candOut } = await execAsync(candCmd, { timeout: 15000 });
+      const { stdout: candOut } = await execAsync(candCmd, { timeout: 20000 });
       const candLines = candOut.split(/\r?\n/).filter(Boolean);
       let bestId = null;
       let minDiff = Infinity;
@@ -223,20 +223,23 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
-    await execAsync(cmd, { timeout: 35000 });
+    await execAsync(cmd, { timeout: 55000 });
   } catch (err) {
     logger.warn('Primary music download failed, trying YouTube fallback:', err.message);
     const cleanTerm = searchTerm.replace(/^(https?:\/\/[^\s]+|ytsearch\d*:|scsearch\d*:)/i, '').trim();
     const fallbackTitle = metadata.title && metadata.artist ? `${metadata.artist} ${metadata.title}` : (metadata.title || cleanTerm || searchTerm);
-    const cleanFallback = fallbackTitle.replace(/^https?:\/\/[^\s]+/i, '').trim() || cleanTerm;
+    const cleanFallback = fallbackTitle
+      .replace(/\s*[\(\[](?:feat|ft|with|prod|remaster|version|refix|remix|edit|mix)\b.*?[\]\)]/gi, '')
+      .replace(/^https?:\/\/[^\s]+/i, '')
+      .trim() || cleanTerm;
     const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback}`)}`;
     try {
-      await execAsync(fallbackCmd, { timeout: 35000 });
+      await execAsync(fallbackCmd, { timeout: 45000 });
     } catch (fallbackErr) {
       logger.warn('YouTube fallback failed, trying SoundCloud fallback:', fallbackErr.message);
       const scCmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(`scsearch1:${cleanFallback}`)}`;
       try {
-        await execAsync(scCmd, { timeout: 25000 });
+        await execAsync(scCmd, { timeout: 30000 });
       } catch (scErr) {
         logger.warn('SoundCloud fallback failed:', scErr.message);
         throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
