@@ -1312,23 +1312,67 @@ export async function generateBratVideoSticker(text) {
   }
 }
 
-function renderBratSvg(layout, visibleWords, activeIndex = -1, activeOpacity = 1.0, activeDy = 0) {
+export function interpolateHexColor(color1, color2, factor) {
+  const c1 = parseInt(String(color1 || '#ffffff').replace('#', ''), 16);
+  const c2 = parseInt(String(color2 || '#000000').replace('#', ''), 16);
+
+  const r1 = (c1 >> 16) & 255;
+  const g1 = (c1 >> 8) & 255;
+  const b1 = c1 & 255;
+
+  const r2 = (c2 >> 16) & 255;
+  const g2 = (c2 >> 8) & 255;
+  const b2 = c2 & 255;
+
+  const f = Math.max(0, Math.min(1, factor));
+  const r = Math.round(r1 + (r2 - r1) * f);
+  const g = Math.round(g1 + (g2 - g1) * f);
+  const b = Math.round(b1 + (b2 - b1) * f);
+
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+export function getLayerTheme(lineIndex, baseTheme = '') {
+  let isEvenWhite = true;
+  if (baseTheme === 'black' || /-black\b/i.test(baseTheme)) {
+    isEvenWhite = false;
+  }
+
+  const isWhite = (lineIndex % 2 === 0) ? isEvenWhite : !isEvenWhite;
+  const bg = isWhite ? '#ffffff' : '#000000';
+  const textColor = isWhite ? '#000000' : '#ffffff';
+
+  return { bg, textColor, isWhite };
+}
+
+function renderBratSvg(
+  layout,
+  visibleWords,
+  activeIndex = -1,
+  activeOpacity = 1.0,
+  activeDy = 0,
+  overrideBg = null,
+  overrideTextColor = null,
+  blurStdDev = 0.9
+) {
+  const bg = overrideBg || layout.bg;
+  const textColor = overrideTextColor || (bg === '#000000' || bg === '#0a0a0a' ? '#ffffff' : layout.textColor);
   const textElements = visibleWords.map((pw, idx) => {
     const isNewest = idx === activeIndex;
     const op = isNewest ? activeOpacity : 1.0;
     const dy = isNewest ? activeDy : 0;
     const yPos = parseFloat(pw.y) + dy;
-    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
+    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
   });
 
   return `
     <svg width="${layout.canvasSize}" height="${layout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <filter id="bratBlur" x="-10%" y="-10%" width="120%" height="120%">
-          <feGaussianBlur stdDeviation="0.9" />
+          <feGaussianBlur stdDeviation="${Number(blurStdDev).toFixed(2)}" />
         </filter>
       </defs>
-      <rect width="100%" height="100%" fill="${layout.bg}" />
+      <rect width="100%" height="100%" fill="${bg}" />
       ${textElements.join('\n      ')}
     </svg>
   `;
@@ -2074,20 +2118,39 @@ export async function generateBratVideoMp4({
         }
       }
 
+      const firstLineTheme = getLayerTheme(0, theme);
+      const introTheme = {
+        bg: firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff',
+        textColor: firstLineTheme.bg === '#ffffff' ? '#ffffff' : '#000000',
+      };
+      let prevLayerBg = introTheme.bg;
+
       const introDuration = activeSegments[0].time - startTime;
       if (introDuration > 0.05) {
         const introFrames = Math.max(1, Math.round(introDuration * 24));
         const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
         const introLayout = computeBratLayout(introText);
-        const introSvg = renderBratSvg(introLayout, introLayout.positionedWords);
+        const introSvg = renderBratSvg(
+          introLayout,
+          introLayout.positionedWords,
+          -1,
+          1.0,
+          0,
+          introTheme.bg,
+          introTheme.textColor
+        );
         const introPath = path.join(tmpDir, 'base_intro.png');
         await sharp(Buffer.from(introSvg)).png().toFile(introPath);
         pushFrame(introPath, introFrames);
+      } else {
+        prevLayerBg = firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff';
       }
 
       for (let i = 0; i < activeSegments.length; i++) {
         const cur = activeSegments[i];
         const next = activeSegments[i + 1];
+
+        const curTheme = getLayerTheme(i, theme);
 
         // Kunci frame awal dan akhir setiap baris terhadap timeline absolut audio agar bebas drift kumulatif
         const currentLineStartFrame = globalFrameCount;
@@ -2156,52 +2219,135 @@ export async function generateBratVideoMp4({
             }
           }
 
-          // Render setiap kata dengan transisi ease-out halus dan solid hold
+          // Render setiap kata dengan transisi pergantian layer dan transisi ease-out per kata
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
             const activeIdx = step - 1;
             const wordFrames = wordFramesList[activeIdx];
 
-            // Animasi halus: transisi opacity dan micro-glide tanpa patah-patah
             let transitions = [];
-            if (wordFrames >= 7) {
-              transitions = [
-                { op: 0.25, dy: 1.5 },
-                { op: 0.55, dy: 0.8 },
-                { op: 0.85, dy: 0.3 },
-              ];
-            } else if (wordFrames >= 4) {
-              transitions = [
-                { op: 0.35, dy: 1.2 },
-                { op: 0.75, dy: 0.4 },
-              ];
-            } else if (wordFrames >= 2) {
-              transitions = [
-                { op: 0.50, dy: 0.8 },
-              ];
+            if (step === 1) {
+              // Animasi transisi pergantian layer background hitam-putih
+              if (wordFrames >= 5) {
+                transitions = [
+                  { factor: 0.45, op: 0.35, dy: 1.8, blur: 1.6 },
+                  { factor: 0.80, op: 0.70, dy: 0.9, blur: 1.2 },
+                  { factor: 1.00, op: 0.90, dy: 0.3, blur: 0.9 },
+                ];
+              } else if (wordFrames >= 3) {
+                transitions = [
+                  { factor: 0.55, op: 0.45, dy: 1.4, blur: 1.4 },
+                  { factor: 1.00, op: 0.80, dy: 0.5, blur: 1.0 },
+                ];
+              } else {
+                transitions = [
+                  { factor: 0.75, op: 0.60, dy: 0.8, blur: 1.2 },
+                ];
+              }
+            } else {
+              // Animasi halus kata berikutnya pada layer yang sama
+              if (wordFrames >= 7) {
+                transitions = [
+                  { factor: 1.0, op: 0.25, dy: 1.5, blur: 0.9 },
+                  { factor: 1.0, op: 0.55, dy: 0.8, blur: 0.9 },
+                  { factor: 1.0, op: 0.85, dy: 0.3, blur: 0.9 },
+                ];
+              } else if (wordFrames >= 4) {
+                transitions = [
+                  { factor: 1.0, op: 0.35, dy: 1.2, blur: 0.9 },
+                  { factor: 1.0, op: 0.75, dy: 0.4, blur: 0.9 },
+                ];
+              } else if (wordFrames >= 2) {
+                transitions = [
+                  { factor: 1.0, op: 0.50, dy: 0.8, blur: 0.9 },
+                ];
+              }
             }
 
             for (let t = 0; t < transitions.length; t++) {
               const tr = transitions[t];
-              const trSvg = renderBratSvg(lineLayout, visible, activeIdx, tr.op, tr.dy);
+              const frameBg = tr.factor < 1.0
+                ? interpolateHexColor(prevLayerBg, curTheme.bg, tr.factor)
+                : curTheme.bg;
+              const trSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                tr.op,
+                tr.dy,
+                frameBg,
+                curTheme.textColor,
+                tr.blur || 0.9
+              );
               const trPath = path.join(tmpDir, `base_w${i}_${step}_tr${t}.png`);
               await sharp(Buffer.from(trSvg)).png().toFile(trPath);
               pushFrame(trPath, 1);
             }
 
             const solidFrames = Math.max(1, wordFrames - transitions.length);
-            const solidSvg = renderBratSvg(lineLayout, visible, activeIdx, 1.0, 0.0);
+            const solidSvg = renderBratSvg(
+              lineLayout,
+              visible,
+              activeIdx,
+              1.0,
+              0.0,
+              curTheme.bg,
+              curTheme.textColor,
+              0.9
+            );
             const solidPath = path.join(tmpDir, `base_w${i}_${step}_solid.png`);
             await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
             pushFrame(solidPath, solidFrames);
           }
         } else {
           // Baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
-          const lineSvg = renderBratSvg(lineLayout, lineLayout.positionedWords);
+          let lineTransitions = [];
+          if (totalLineFrames >= 6) {
+            lineTransitions = [
+              { factor: 0.45, op: 0.35, dy: 1.6, blur: 1.6 },
+              { factor: 0.80, op: 0.70, dy: 0.8, blur: 1.2 },
+            ];
+          } else if (totalLineFrames >= 3) {
+            lineTransitions = [
+              { factor: 0.65, op: 0.50, dy: 1.0, blur: 1.3 },
+            ];
+          }
+
+          for (let t = 0; t < lineTransitions.length; t++) {
+            const tr = lineTransitions[t];
+            const frameBg = interpolateHexColor(prevLayerBg, curTheme.bg, tr.factor);
+            const trSvg = renderBratSvg(
+              lineLayout,
+              lineLayout.positionedWords,
+              -1,
+              tr.op,
+              tr.dy,
+              frameBg,
+              curTheme.textColor,
+              tr.blur || 0.9
+            );
+            const trPath = path.join(tmpDir, `base_line_${i}_tr${t}.png`);
+            await sharp(Buffer.from(trSvg)).png().toFile(trPath);
+            pushFrame(trPath, 1);
+          }
+
+          const solidFrames = Math.max(1, totalLineFrames - lineTransitions.length);
+          const lineSvg = renderBratSvg(
+            lineLayout,
+            lineLayout.positionedWords,
+            -1,
+            1.0,
+            0.0,
+            curTheme.bg,
+            curTheme.textColor,
+            0.9
+          );
           const linePath = path.join(tmpDir, `base_line_${i}.png`);
           await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
-          pushFrame(linePath, totalLineFrames);
+          pushFrame(linePath, solidFrames);
         }
+
+        prevLayerBg = curTheme.bg;
       }
 
       const audioDuration = getAudioDuration(audioPath);
@@ -2253,6 +2399,7 @@ export async function generateBratVideoMp4({
       for (let i = 0; i < lines.length; i++) {
         const curLine = lines[i] + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(curLine);
+        const curTheme = getLayerTheme(i, theme);
         const numWords = lineLayout.positionedWords.length;
 
         if (numWords > 1 && durationPerLine >= 1.2) {
@@ -2262,14 +2409,14 @@ export async function generateBratVideoMp4({
 
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
-            const svg = renderBratSvg(lineLayout, visible);
+            const svg = renderBratSvg(lineLayout, visible, step - 1, 1.0, 0, curTheme.bg, curTheme.textColor);
             const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
             await sharp(Buffer.from(svg)).png().toFile(framePath);
             const dur = step === numWords ? holdDuration : stepDuration;
             concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
           }
         } else {
-          const svg = renderBratSvg(lineLayout, lineLayout.positionedWords);
+          const svg = renderBratSvg(lineLayout, lineLayout.positionedWords, -1, 1.0, 0, curTheme.bg, curTheme.textColor);
           const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
           await sharp(Buffer.from(svg)).png().toFile(framePath);
           concatEntries.push({ file: framePath, duration: durationPerLine.toFixed(3) });
