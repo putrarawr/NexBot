@@ -1693,7 +1693,10 @@ export async function fetchSongLyricsWithSync(query) {
             plainLyrics: wordSegments.map((s) => s.text).join('\n'),
           };
 
-          if (plusData.hasWordSync) {
+          const lastSegTime = wordSegments[wordSegments.length - 1]?.time || 0;
+          const isTruncated = item.duration > 60 && lastSegTime < item.duration * 0.55 && wordSegments.length < 20;
+
+          if (plusData.hasWordSync && !isTruncated) {
             return item;
           } else if (!plusFallback) {
             plusFallback = item;
@@ -1970,12 +1973,37 @@ export function selectLrcWindow(segments, {
     let highestWps = 0;
     let rapIdx = 0;
     for (let i = 0; i < segments.length - 1; i++) {
-      const dur = Math.max(1, segments[i + 1].time - segments[i].time);
-      const words = segments[i].text.trim().split(/\s+/).length;
-      const wps = words / dur;
+      const curWindow = Math.min(3, segments.length - i);
+      let totalWords = 0;
+      for (let w = 0; w < curWindow; w++) {
+        totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
+      }
+      const endTime = (i + curWindow < segments.length)
+        ? segments[i + curWindow].time
+        : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
+      const dur = Math.max(1.0, endTime - segments[i].time);
+      const wps = totalWords / dur;
       if (wps > highestWps && segments[i].time > 8) {
         highestWps = wps;
         rapIdx = i;
+      }
+    }
+    if (highestWps === 0) {
+      for (let i = 0; i < segments.length - 1; i++) {
+        const curWindow = Math.min(3, segments.length - i);
+        let totalWords = 0;
+        for (let w = 0; w < curWindow; w++) {
+          totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
+        }
+        const endTime = (i + curWindow < segments.length)
+          ? segments[i + curWindow].time
+          : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
+        const dur = Math.max(1.0, endTime - segments[i].time);
+        const wps = totalWords / dur;
+        if (wps > highestWps) {
+          highestWps = wps;
+          rapIdx = i;
+        }
       }
     }
     startIndex = rapIdx;
@@ -2009,16 +2037,23 @@ export function selectLrcWindow(segments, {
       let highestWps = 0;
       let rapIdx = -1;
       for (let i = 0; i < segments.length - 1; i++) {
-        const dur = Math.max(1, segments[i + 1].time - segments[i].time);
-        const words = segments[i].text.trim().split(/\s+/).length;
-        const wps = words / dur;
-        if (wps > highestWps && segments[i].time > 8 && words >= 6) {
+        const curWindow = Math.min(3, segments.length - i);
+        let totalWords = 0;
+        for (let w = 0; w < curWindow; w++) {
+          totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
+        }
+        const endTime = (i + curWindow < segments.length)
+          ? segments[i + curWindow].time
+          : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
+        const dur = Math.max(1.0, endTime - segments[i].time);
+        const wps = totalWords / dur;
+        if (wps > highestWps && segments[i].time > 8 && totalWords >= 8) {
           highestWps = wps;
           rapIdx = i;
         }
       }
 
-      if (highestWps >= 4.5 && rapIdx !== -1) {
+      if (highestWps >= 4.0 && rapIdx !== -1) {
         startIndex = rapIdx;
         partLabel = 'Bagian Rap / Verse Cepat (30s)';
       } else {
@@ -2112,28 +2147,14 @@ export async function generateBratVideoMp4({
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
 
-    // Deteksi apakah lagu atau segmen ini memiliki aliran rap cepat (high tempo / words per second)
-    const isFastRapSong = isRap || (Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.some((s) => {
-      const dur = s.duration || 1.0;
-      const count = s.words?.length || s.text.split(/\s+/).length;
-      return (count / Math.max(0.4, dur)) >= 3.8;
-    }));
-
     let segments;
     if (lyricsData.hasWordSync && Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.length > 0) {
       // Offset kata:
-      // Jika pengguna memasukkan offset kustom (-offset), gunakan nilai tersebut.
-      // Jika rap cepat, gunakan lead offset -0.12s agar kata muncul tepat sebelum artikulasi vokal konsonan cepat.
-      // Jika lagu normal, lead offset -0.06s untuk sinkronisasi nada vokal yang natural.
-      const defaultLead = isFastRapSong ? -0.12 : -0.06;
-      const baseOffset = isCustomOffset ? syncOffset : defaultLead;
+      // Hanya gunakan offset kustom jika diminta pengguna (-offset).
+      // Sinkronisasi resmi Apple Music/Spotify sudah akurat per nada vokal.
+      const effectiveOffset = isCustomOffset ? syncOffset : 0;
 
       segments = lyricsData.wordSegments.map((ws) => {
-        const lineDur = ws.duration || 1.0;
-        const lineWords = ws.words?.length || ws.text.split(/\s+/).length;
-        const isLineRap = (lineWords / Math.max(0.4, lineDur)) >= 3.8;
-        const effectiveOffset = isCustomOffset ? syncOffset : (isLineRap ? -0.12 : baseOffset);
-
         return {
           ...ws,
           time: Math.max(0, ws.time + effectiveOffset),
@@ -2147,15 +2168,21 @@ export async function generateBratVideoMp4({
       if (!lyricsData.syncedLyrics) {
         throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
       }
-      // Fallback LRC: Jika rap cepat, lead offset -0.12s agar baris lirik tidak tertinggal flow rapper
-      const defaultLrcOffset = isFastRapSong ? -0.12 : -0.06;
-      const effectiveLrcOffset = isCustomOffset ? syncOffset : defaultLrcOffset;
+      const effectiveLrcOffset = isCustomOffset ? syncOffset : 0;
       segments = parseLrcLyrics(lyricsData.syncedLyrics, effectiveLrcOffset);
     }
 
     if (segments.length === 0) {
       throw new Error(`Format lirik lagu "${lyricsData.trackName}" tidak dapat diproses.`);
     }
+
+    // Deteksi apakah lagu atau segmen ini memiliki aliran rap cepat (high tempo / words per second)
+    const isFastRapSong = isRap || segments.some((s, idx) => {
+      const nextSeg = segments[idx + 1];
+      const dur = nextSeg ? Math.max(0.4, nextSeg.time - s.time) : (s.duration || 2.0);
+      const count = s.words?.length || s.text.trim().split(/\s+/).length;
+      return (count / dur) >= 3.8;
+    });
 
     const searchTarget = `${lyricsData.artistName} - ${lyricsData.trackName}`;
     let musicTrack = null;
@@ -2292,11 +2319,12 @@ export async function generateBratVideoMp4({
             // Path 2: Fallback berbasis bobot suku kata dengan alokasi jendela aktif menyanyi
             const lineDur = totalLineFrames / 24;
             const lineWps = numWords / Math.max(0.4, lineDur);
-            const isLineRapFlow = isRap || lineWps >= 3.8;
+            const isLineRapFlow = isFastRapSong || isRap || lineWps >= 3.8;
 
-            // Pada rap cepat, rapper tidak mengambil jeda hening di akhir baris (flow sambung menyambung)
-            const pauseFrames = isLineRapFlow ? 0 : Math.max(1, Math.round(totalLineFrames * 0.10));
-            const vocalFrames = Math.max(numWords, totalLineFrames - pauseFrames);
+            // Cadence kata per detik: aliran rap cepat ~4.8 wps, lagu normal ~2.6 wps
+            const cadenceWps = isLineRapFlow ? 4.8 : 2.6;
+            const naturalVocalFrames = Math.max(numWords, Math.round((numWords / cadenceWps) * 24));
+            const vocalFrames = Math.min(totalLineFrames, naturalVocalFrames);
 
             const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
               const isLast = idx === numWords - 1;
@@ -2326,7 +2354,16 @@ export async function generateBratVideoMp4({
             const wordFrames = wordFramesList[activeIdx];
 
             let transitions = [];
-            if (step === 1) {
+            if (isFastRapSong || isRap) {
+              // Untuk lagu rap cepat: kata langsung tajam dan solid tanpa delay/ghosting/blur visual
+              if (step === 1 && prevLayerBg !== curTheme.bg && wordFrames >= 3) {
+                transitions = [
+                  { factor: 0.6, op: 0.9, dy: 0, blur: 0.9 },
+                ];
+              } else {
+                transitions = [];
+              }
+            } else if (step === 1) {
               // Animasi transisi pergantian layer background hitam-putih
               if (wordFrames >= 5) {
                 transitions = [
