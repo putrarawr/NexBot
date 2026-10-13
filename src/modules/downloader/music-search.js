@@ -177,6 +177,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
     }
   }
 
+  const isSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
   if (metadata.targetDuration && !isSearchPrefixed && !isDirectMediaUrl) {
     try {
       const safeDuration = Number(metadata.targetDuration);
