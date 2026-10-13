@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -356,6 +356,36 @@ async function runAllTests() {
     assert.equal(lrcParsed.length, 2);
     assert.equal(lrcParsed[0].time, 1.5);
     assert.equal(lrcParsed[0].text, 'baris lirik satu');
+
+    const sampleSegments = [
+      { time: 5, text: 'intro verse satu' },
+      { time: 15, text: 'intro verse dua' },
+      { time: 30, text: 'reff ini chorus lagu' },
+      { time: 40, text: 'verse tiga' },
+      { time: 55, text: 'reff ini chorus lagu' },
+      { time: 70, text: 'rap cepat satu dua tiga empat lima enam tujuh delapan' },
+      { time: 75, text: 'outro selesai' },
+    ];
+
+    const defWin = selectLrcWindow(sampleSegments, {});
+    assert.equal(defWin.startTime, 3.5);
+    assert.ok(defWin.activeSegments.length > 0);
+
+    const fullWin = selectLrcWindow(sampleSegments, { isFull: true });
+    assert.equal(fullWin.activeSegments.length, sampleSegments.length);
+    assert.equal(fullWin.partLabel, 'Full Lirik (Lengkap)');
+
+    const reffWin = selectLrcWindow(sampleSegments, { isReff: true });
+    assert.ok(reffWin.activeSegments[0].text.includes('reff'));
+
+    const searchWin = selectLrcWindow(sampleSegments, { lyricSearch: 'verse tiga' });
+    assert.equal(searchWin.activeSegments[0].text, 'verse tiga');
+
+    const fromWin = selectLrcWindow(sampleSegments, { fromTime: 50 });
+    assert.equal(fromWin.activeSegments[0].time, 55);
+
+    const rapWin = selectLrcWindow(sampleSegments, { isRap: true });
+    assert.equal(rapWin.activeSegments[0].time, 70);
 
     const bratMp4Res = await generateBratVideoMp4({ text: 'kamu nanya tapi kamu ga dengerin -green' });
     assert.ok(bratMp4Res.buffer.length > 1000, 'Brat MP4 video buffer should be valid');

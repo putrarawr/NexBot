@@ -808,14 +808,37 @@ export function registerMediaCommands() {
       const hasSongFlag = /-song\b|-lagu\b/i.test(text);
       const isSongMode = isSongCommand || hasSongFlag;
 
+      const isFull = /-full\b|-lengkap\b|-semua\b/i.test(text);
+      const isReff = /-reff\b|-chorus\b|-ref\b/i.test(text);
+      const isRap = /-rap\b/i.test(text);
+      const isTypingEffect = /-type\b|-typing\b/i.test(text);
+
+      let fromTime = null;
+      const fromMatch = /-(?:from|start|mulai)[:\s]+([0-9:]+)/i.exec(text);
+      if (fromMatch) {
+        fromTime = parseTimeSeconds(fromMatch[1]);
+      }
+
+      let lyricSearch = '';
+      const lirikMatch = /(?:lirik:|-lirik\s+)(["']?)(.+?)\1(?:\s+-[a-z0-9]+|\s*$)/i.exec(text);
+      if (lirikMatch) {
+        lyricSearch = lirikMatch[2].trim();
+      }
+
       let theme = '';
       if (/-green\b/i.test(text)) theme = '-green';
       else if (/-black\b/i.test(text)) theme = '-black';
       else if (/-white\b/i.test(text)) theme = '-white';
 
       const cleanedText = text
+        .replace(/-(?:from|start|mulai)[:\s]+[0-9:]+/gi, '')
+        .replace(/(?:lirik:|-lirik\s+)(["']?).+?\1(?:\s+-[a-z0-9]+|\s*$)/gi, '')
         .replace(/-song\b/gi, '')
         .replace(/-lagu\b/gi, '')
+        .replace(/-full\b|-lengkap\b|-semua\b/gi, '')
+        .replace(/-reff\b|-chorus\b|-ref\b/gi, '')
+        .replace(/-rap\b/gi, '')
+        .replace(/-type\b|-typing\b/gi, '')
         .replace(/-green\b/gi, '')
         .replace(/-black\b/gi, '')
         .replace(/-white\b/gi, '')
@@ -824,11 +847,17 @@ export function registerMediaCommands() {
       if (!cleanedText && !quotedAudio) {
         return reply(
           `[!] Format penggunaan Brat Video MP4:\n\n` +
-          `1. Sinkron Lirik Lagu:\n` +
+          `1. Sinkron Lirik Lagu (Default 30 Detik):\n` +
           `<code>${prefix}bratmp4 -song Fix You Coldplay</code> atau <code>${prefix}bratsong Laskar Pelangi -green</code>\n\n` +
-          `2. Balas Audio/Voice Note:\n` +
+          `2. Request Bagian Lagu Tertentu:\n` +
+          `• Reff/Chorus: <code>${prefix}bratmp4 -song Laskar Pelangi -reff</code>\n` +
+          `• Bagian Rap: <code>${prefix}bratmp4 -song Judul -rap</code>\n` +
+          `• Full Lirik Lagu: <code>${prefix}bratmp4 -song Judul -full</code>\n` +
+          `• Menit tertentu: <code>${prefix}bratmp4 -song Judul -from 01:25</code>\n` +
+          `• Cari lirik: <code>${prefix}bratmp4 -song Judul lirik:menarilah</code>\n\n` +
+          `3. Balas Audio/Voice Note:\n` +
           `Balas pesan audio dengan <code>${prefix}bratmp4 baris satu / baris dua</code>\n\n` +
-          `3. Video Teks Kustom:\n` +
+          `4. Video Teks Kustom:\n` +
           `<code>${prefix}bratmp4 kamu nanya tapi kamu ga dengerin</code>`
         );
       }
@@ -839,12 +868,19 @@ export function registerMediaCommands() {
           const result = await generateBratVideoMp4({
             songQuery: cleanedText,
             theme,
+            isFull,
+            isReff,
+            isRap,
+            fromTime,
+            lyricSearch,
+            isTypingEffect,
           });
 
           const caption =
             `*[ BRAT LYRIC VIDEO ]*\n\n` +
             `Judul: *${result.trackName}*\n` +
             `Artis: *${result.artistName}*\n` +
+            `Bagian: *${result.partLabel}*\n` +
             `Durasi: *${result.duration.toFixed(1)} detik*\n\n` +
             `Lirik tersinkronisasi otomatis dengan audio lagu.`;
 
@@ -1311,11 +1347,138 @@ export function parseLrcLyrics(lrcString) {
   return result;
 }
 
+export function parseTimeSeconds(str) {
+  if (!str) return null;
+  const clean = String(str).trim();
+  const parts = clean.split(':');
+  if (parts.length === 2) {
+    const m = parseFloat(parts[0]);
+    const s = parseFloat(parts[1]);
+    if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
+  }
+  const val = parseFloat(clean);
+  return !isNaN(val) ? val : null;
+}
+
+export function selectLrcWindow(segments, {
+  isFull = false,
+  isReff = false,
+  isRap = false,
+  fromTime = null,
+  lyricSearch = '',
+  maxDuration = 35,
+} = {}) {
+  if (!segments || segments.length === 0) {
+    return { activeSegments: [], startTime: 0, partLabel: 'Intro' };
+  }
+
+  let startIndex = 0;
+  let partLabel = 'Awal Lagu (30s)';
+
+  if (isFull) {
+    partLabel = 'Full Lirik (Lengkap)';
+  } else if (lyricSearch) {
+    const q = lyricSearch.toLowerCase().trim();
+    const foundIdx = segments.findIndex((s) => s.text.toLowerCase().includes(q));
+    if (foundIdx !== -1) {
+      startIndex = foundIdx;
+      partLabel = `Kustom ("${segments[foundIdx].text.slice(0, 24)}")`;
+    }
+  } else if (fromTime !== null && !isNaN(fromTime) && fromTime >= 0) {
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    segments.forEach((s, idx) => {
+      const diff = Math.abs(s.time - fromTime);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = idx;
+      }
+    });
+    startIndex = closestIdx;
+    const m = Math.floor(fromTime / 60);
+    const s = Math.floor(fromTime % 60);
+    partLabel = `Menit ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  } else if (isReff) {
+    const textCounts = new Map();
+    segments.forEach((s) => {
+      const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      if (clean.length > 5) {
+        textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
+      }
+    });
+
+    const totalSongDuration = segments[segments.length - 1].time;
+    const minReffTime = totalSongDuration * 0.25;
+    let bestReffIdx = -1;
+
+    for (let i = 0; i < segments.length; i++) {
+      const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
+        bestReffIdx = i;
+        break;
+      }
+    }
+
+    if (bestReffIdx !== -1) {
+      startIndex = bestReffIdx;
+    } else {
+      const targetTime = totalSongDuration * 0.35;
+      startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+    }
+    partLabel = 'Reff / Chorus (30s)';
+  } else if (isRap) {
+    let highestWps = 0;
+    let rapIdx = 0;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const dur = Math.max(1, segments[i + 1].time - segments[i].time);
+      const words = segments[i].text.trim().split(/\s+/).length;
+      const wps = words / dur;
+      if (wps > highestWps && segments[i].time > 10) {
+        highestWps = wps;
+        rapIdx = i;
+      }
+    }
+    startIndex = rapIdx;
+    partLabel = 'Bagian Rap / Verse Cepat (30s)';
+  }
+
+  const selectedFirst = segments[startIndex] || segments[0];
+  const startTime = Math.max(0, selectedFirst.time - 1.5);
+
+  let activeSegments = [];
+  if (isFull) {
+    activeSegments = segments.slice(startIndex);
+  } else {
+    for (let i = startIndex; i < segments.length; i++) {
+      activeSegments.push(segments[i]);
+      if (segments[i].time - selectedFirst.time >= maxDuration) {
+        break;
+      }
+    }
+  }
+
+  if (activeSegments.length === 0) activeSegments.push(selectedFirst);
+
+  return {
+    startIndex,
+    activeSegments,
+    startTime,
+    isFull,
+    partLabel,
+  };
+}
+
 export async function generateBratVideoMp4({
   text = '',
   audioBuffer = null,
   songQuery = '',
   theme = '',
+  isFull = false,
+  isReff = false,
+  isRap = false,
+  fromTime = null,
+  lyricSearch = '',
+  isTypingEffect = false,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1348,17 +1511,22 @@ export async function generateBratVideoMp4({
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter((l) => l.length > 0 && !l.startsWith('['));
-        const chosen = plainLines.slice(0, 8);
+        const chosen = isFull ? plainLines : plainLines.slice(0, 8);
         segments = chosen.map((t, idx) => ({ time: idx * 4.0, text: t }));
       }
 
-      const firstLyricTime = segments[0].time;
-      const startTime = Math.max(0, firstLyricTime - 1.5);
-      const maxDuration = 35;
-      const activeSegments = segments.filter(
-        (s) => s.time >= startTime && s.time - startTime <= maxDuration
-      );
-      if (activeSegments.length === 0) activeSegments.push(segments[0]);
+      const windowInfo = selectLrcWindow(segments, {
+        isFull,
+        isReff,
+        isRap,
+        fromTime,
+        lyricSearch,
+        maxDuration: 35,
+      });
+
+      const activeSegments = windowInfo.activeSegments;
+      const startTime = windowInfo.startTime;
+      const partLabel = windowInfo.partLabel;
 
       const concatEntries = [];
       let frameCounter = 0;
@@ -1376,13 +1544,13 @@ export async function generateBratVideoMp4({
       for (let i = 0; i < activeSegments.length; i++) {
         const cur = activeSegments[i];
         const next = activeSegments[i + 1];
-        const segDuration = next ? Math.max(0.2, next.time - cur.time) : 4.0;
+        const segDuration = next ? Math.max(0.5, next.time - cur.time) : 4.0;
         const lineText = cur.text + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
-        if (numWords > 1 && segDuration >= 1.2) {
-          const typeDuration = Math.min(segDuration * 0.45, numWords * 0.22);
+        if (isTypingEffect && numWords > 1 && segDuration >= 1.5) {
+          const typeDuration = segDuration * 0.75;
           const stepDuration = typeDuration / numWords;
           const holdDuration = segDuration - (stepDuration * (numWords - 1));
 
@@ -1395,6 +1563,8 @@ export async function generateBratVideoMp4({
             concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
           }
         } else {
+          // Default: Line-by-line format (khas Brat lyric video TikTok/Reels)
+          // Baris lirik tampil utuh dan stabil dari awal vokal hingga baris berikutnya
           const svg = renderBratSvg(lineLayout, lineLayout.positionedWords);
           const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
           await sharp(Buffer.from(svg)).png().toFile(framePath);
@@ -1415,13 +1585,13 @@ export async function generateBratVideoMp4({
       const slicedAudio = path.join(tmpDir, 'sliced.aac');
       execSync(
         `ffmpeg -y -accurate_seek -ss ${startTime.toFixed(3)} -i "${audioPath}" -t ${totalDuration.toFixed(3)} -c:a aac -b:a 192k "${slicedAudio}"`,
-        { timeout: 30000 }
+        { timeout: 45000 }
       );
 
       const outMp4 = path.join(tmpDir, 'output.mp4');
       execSync(
         `ffmpeg -y -f concat -safe 0 -i "${listPath}" -i "${slicedAudio}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a copy -shortest -movflags +faststart "${outMp4}"`,
-        { timeout: 45000 }
+        { timeout: 60000 }
       );
 
       return {
@@ -1429,6 +1599,7 @@ export async function generateBratVideoMp4({
         trackName: lyricsData.trackName,
         artistName: lyricsData.artistName,
         duration: totalDuration,
+        partLabel,
       };
     } finally {
       try {
