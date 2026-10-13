@@ -179,7 +179,8 @@ export async function downloadMusicTrack(target, metadata = {}) {
 
   const rand = Math.random().toString(36).slice(2, 8);
   const outTemplate = path.join(os.tmpdir(), `spot_${Date.now()}_${rand}.%(ext)s`);
-  const searchTarget = searchTerm.startsWith('http') ? searchTerm : `scsearch1:${searchTerm}`;
+  const isSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
+  const searchTarget = isSearchPrefixed ? searchTerm : `scsearch1:${searchTerm}`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "bestaudio/best" -x --audio-format mp3 --audio-quality 0 --max-filesize 35M -o "${outTemplate}"`;
   const directArgs = isDirectMediaUrl ? '--extractor-args "youtube:player_client=android,web" ' : '';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;

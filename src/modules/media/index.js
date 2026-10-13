@@ -842,10 +842,10 @@ export function registerMediaCommands() {
           });
 
           const caption =
-            `<b>[ BRAT LYRIC VIDEO ]</b>\n\n` +
-            `Judul: <b>${escapeHtml(result.trackName)}</b>\n` +
-            `Artis: <b>${escapeHtml(result.artistName)}</b>\n` +
-            `Durasi: <b>${result.duration.toFixed(1)} detik</b>\n\n` +
+            `*[ BRAT LYRIC VIDEO ]*\n\n` +
+            `Judul: *${result.trackName}*\n` +
+            `Artis: *${result.artistName}*\n` +
+            `Durasi: *${result.duration.toFixed(1)} detik*\n\n` +
             `Lirik tersinkronisasi otomatis dengan audio lagu.`;
 
           await sock.sendMessage(jid, {
@@ -862,7 +862,7 @@ export function registerMediaCommands() {
 
           await sock.sendMessage(jid, {
             video: result.buffer,
-            caption: `<b>[ BRAT AUDIO VIDEO ]</b>\n\nVideo sinkronisasi audio berhasil dibuat (${result.duration.toFixed(1)}s).`,
+            caption: `*[ BRAT AUDIO VIDEO ]*\n\nVideo sinkronisasi audio berhasil dibuat (${result.duration.toFixed(1)}s).`,
             mimetype: 'video/mp4',
           });
         } else {
@@ -873,7 +873,7 @@ export function registerMediaCommands() {
 
           await sock.sendMessage(jid, {
             video: result.buffer,
-            caption: `<b>[ BRAT MP4 VIDEO ]</b>\n\n"${escapeHtml(cleanedText)}"`,
+            caption: `*[ BRAT MP4 VIDEO ]*\n\n"${cleanedText}"`,
             mimetype: 'video/mp4',
           });
         }
@@ -1325,7 +1325,14 @@ export async function generateBratVideoMp4({
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
 
-    const musicTrack = await downloadMusicTrack(cleanQuery);
+    const searchTarget = `ytsearch1:${lyricsData.trackName} ${lyricsData.artistName} official audio`;
+    let musicTrack = null;
+    try {
+      musicTrack = await downloadMusicTrack(searchTarget);
+    } catch {
+      musicTrack = await downloadMusicTrack(cleanQuery);
+    }
+
     if (!musicTrack?.buffer) {
       throw new Error(`Gagal mengunduh audio lagu "${cleanQuery}".`);
     }
@@ -1346,7 +1353,7 @@ export async function generateBratVideoMp4({
       }
 
       const firstLyricTime = segments[0].time;
-      const startTime = Math.max(0, firstLyricTime - 1.2);
+      const startTime = Math.max(0, firstLyricTime - 1.5);
       const maxDuration = 35;
       const activeSegments = segments.filter(
         (s) => s.time >= startTime && s.time - startTime <= maxDuration
@@ -1357,7 +1364,7 @@ export async function generateBratVideoMp4({
       let frameCounter = 0;
 
       const introDuration = activeSegments[0].time - startTime;
-      if (introDuration >= 0.8) {
+      if (introDuration > 0.05) {
         const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
         const introLayout = computeBratLayout(introText);
         const introSvg = renderBratSvg(introLayout, introLayout.positionedWords);
@@ -1369,15 +1376,15 @@ export async function generateBratVideoMp4({
       for (let i = 0; i < activeSegments.length; i++) {
         const cur = activeSegments[i];
         const next = activeSegments[i + 1];
-        const segDuration = next ? Math.max(1.2, next.time - cur.time) : 4.0;
+        const segDuration = next ? Math.max(0.2, next.time - cur.time) : 4.0;
         const lineText = cur.text + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
-        if (numWords > 1) {
-          const typeDuration = Math.min(segDuration * 0.65, numWords * 0.35);
-          const stepDuration = Math.max(0.12, typeDuration / numWords);
-          const holdDuration = Math.max(0.5, segDuration - (stepDuration * (numWords - 1)));
+        if (numWords > 1 && segDuration >= 1.2) {
+          const typeDuration = Math.min(segDuration * 0.45, numWords * 0.22);
+          const stepDuration = typeDuration / numWords;
+          const holdDuration = segDuration - (stepDuration * (numWords - 1));
 
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
@@ -1405,9 +1412,15 @@ export async function generateBratVideoMp4({
       lines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
       fs.writeFileSync(listPath, lines.join('\n'));
 
+      const slicedAudio = path.join(tmpDir, 'sliced.aac');
+      execSync(
+        `ffmpeg -y -accurate_seek -ss ${startTime.toFixed(3)} -i "${audioPath}" -t ${totalDuration.toFixed(3)} -c:a aac -b:a 192k "${slicedAudio}"`,
+        { timeout: 30000 }
+      );
+
       const outMp4 = path.join(tmpDir, 'output.mp4');
       execSync(
-        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -ss ${startTime.toFixed(2)} -t ${totalDuration.toFixed(2)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -shortest -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -i "${slicedAudio}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a copy -shortest -movflags +faststart "${outMp4}"`,
         { timeout: 45000 }
       );
 
@@ -1446,10 +1459,10 @@ export async function generateBratVideoMp4({
         const lineLayout = computeBratLayout(curLine);
         const numWords = lineLayout.positionedWords.length;
 
-        if (numWords > 1) {
-          const typeDuration = Math.min(durationPerLine * 0.7, numWords * 0.35);
-          const stepDuration = Math.max(0.12, typeDuration / numWords);
-          const holdDuration = Math.max(0.4, durationPerLine - (stepDuration * (numWords - 1)));
+        if (numWords > 1 && durationPerLine >= 1.2) {
+          const typeDuration = Math.min(durationPerLine * 0.45, numWords * 0.22);
+          const stepDuration = typeDuration / numWords;
+          const holdDuration = durationPerLine - (stepDuration * (numWords - 1));
 
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
