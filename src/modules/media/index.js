@@ -2130,18 +2130,52 @@ export async function generateBratVideoMp4({
         const introFrames = Math.max(1, Math.round(introDuration * 24));
         const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
         const introLayout = computeBratLayout(introText);
-        const introSvg = renderBratSvg(
-          introLayout,
-          introLayout.positionedWords,
-          -1,
-          1.0,
-          0,
-          introTheme.bg,
-          introTheme.textColor
-        );
-        const introPath = path.join(tmpDir, 'base_intro.png');
-        await sharp(Buffer.from(introSvg)).png().toFile(introPath);
-        pushFrame(introPath, introFrames);
+
+        const openFadeFrames = Math.min(6, Math.floor(introFrames * 0.28));
+        const impactFrames = introFrames >= 14 ? 2 : (introFrames >= 6 ? 1 : 0);
+        const solidIntroFrames = Math.max(0, introFrames - openFadeFrames - impactFrames);
+
+        // 1. Opening: Cinematic Smooth Fade-In from Black (ala editing video kreator manusia)
+        for (let f = 0; f < openFadeFrames; f++) {
+          const progress = (f + 1) / (openFadeFrames + 1);
+          const op = progress;
+          const dy = (1 - progress) * 2.5;
+          const blur = 1.8 - progress * 0.9;
+          const frameBg = interpolateHexColor('#000000', introTheme.bg, progress);
+          const svg = renderBratSvg(introLayout, introLayout.positionedWords, -1, op, dy, frameBg, introTheme.textColor, blur);
+          const p = path.join(tmpDir, `intro_fade_${f}.png`);
+          await sharp(Buffer.from(svg)).png().toFile(p);
+          pushFrame(p, 1);
+        }
+
+        // 2. Opening Hold: Menampilkan judul lagu dan artis secara jelas dan estetis
+        if (solidIntroFrames > 0) {
+          const solidIntroSvg = renderBratSvg(introLayout, introLayout.positionedWords, -1, 1.0, 0, introTheme.bg, introTheme.textColor, 0.9);
+          const solidIntroPath = path.join(tmpDir, 'intro_solid.png');
+          await sharp(Buffer.from(solidIntroSvg)).png().toFile(solidIntroPath);
+          pushFrame(solidIntroPath, solidIntroFrames);
+        }
+
+        // 3. Opening Beat-Drop Impact Transition: Flash ritmis tepat saat nada vokal masuk
+        if (impactFrames === 2) {
+          const flashBg1 = interpolateHexColor(introTheme.bg, '#ffffff', 0.60);
+          const svg1 = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.85, 0.5, flashBg1, introTheme.textColor, 1.5);
+          const p1 = path.join(tmpDir, 'intro_impact_0.png');
+          await sharp(Buffer.from(svg1)).png().toFile(p1);
+          pushFrame(p1, 1);
+
+          const flashBg2 = interpolateHexColor(introTheme.bg, firstLineTheme.bg, 0.75);
+          const svg2 = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.50, 0.8, flashBg2, introTheme.textColor, 1.3);
+          const p2 = path.join(tmpDir, 'intro_impact_1.png');
+          await sharp(Buffer.from(svg2)).png().toFile(p2);
+          pushFrame(p2, 1);
+        } else if (impactFrames === 1) {
+          const flashBg = interpolateHexColor(introTheme.bg, '#ffffff', 0.50);
+          const svg = renderBratSvg(introLayout, introLayout.positionedWords, -1, 0.70, 0.5, flashBg, introTheme.textColor, 1.4);
+          const p = path.join(tmpDir, 'intro_impact_0.png');
+          await sharp(Buffer.from(svg)).png().toFile(p);
+          pushFrame(p, 1);
+        }
       } else {
         prevLayerBg = firstLineTheme.bg === '#ffffff' ? '#000000' : '#ffffff';
       }
@@ -2350,6 +2384,46 @@ export async function generateBratVideoMp4({
         prevLayerBg = curTheme.bg;
       }
 
+      // 4. Closing Animation: Smooth Fade-to-Black Outro & Audio Fade-Out (ala finishing video editan manusia)
+      const lastLineIndex = activeSegments.length - 1;
+      const lastLineTheme = getLayerTheme(lastLineIndex, theme);
+      const lastSegment = activeSegments[lastLineIndex];
+      const lastLineText = lastSegment.text + (theme ? ` ${theme}` : '');
+      const lastLineLayout = computeBratLayout(lastLineText);
+
+      // Smooth Fade-to-Black Dissolve (12 frame / 0.5 detik)
+      const outroFadeFrames = 12;
+      for (let f = 0; f < outroFadeFrames; f++) {
+        const progress = (f + 1) / (outroFadeFrames + 1);
+        const op = Math.max(0, 1.0 - progress);
+        const dy = progress * 2.0;
+        const blur = 0.9 + progress * 1.4;
+        const frameBg = interpolateHexColor(lastLineTheme.bg, '#000000', progress);
+        const svg = renderBratSvg(
+          lastLineLayout,
+          lastLineLayout.positionedWords,
+          -1,
+          op,
+          dy,
+          frameBg,
+          lastLineTheme.textColor,
+          blur
+        );
+        const p = path.join(tmpDir, `outro_fade_${f}.png`);
+        await sharp(Buffer.from(svg)).png().toFile(p);
+        pushFrame(p, 1);
+      }
+
+      // Final Blackout Tail (4 frame / ~0.17 detik layar hitam bersih penutup)
+      const finalBlackSvg = `
+        <svg width="${lastLineLayout.canvasSize}" height="${lastLineLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill="#000000" />
+        </svg>
+      `;
+      const finalBlackPath = path.join(tmpDir, 'outro_black.png');
+      await sharp(Buffer.from(finalBlackSvg)).png().toFile(finalBlackPath);
+      pushFrame(finalBlackPath, 4);
+
       const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / 24;
       let safeStartTime = startTime;
@@ -2357,10 +2431,13 @@ export async function generateBratVideoMp4({
         safeStartTime = Math.max(0, audioDuration - totalDuration);
       }
 
+      const fadeDuration = 0.8;
+      const fadeStart = Math.max(0, totalDuration - fadeDuration);
+
       const outMp4 = path.join(tmpDir, 'output.mp4');
       const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
-        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=0.25,afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
         { timeout: ffmpegTimeout }
       );
 
@@ -2433,8 +2510,10 @@ export async function generateBratVideoMp4({
       fs.writeFileSync(listPath, concatLines.join('\n'));
 
       const outMp4 = path.join(tmpDir, 'output.mp4');
+      const fadeDuration = Math.min(0.6, audioDuration * 0.2);
+      const fadeStart = Math.max(0, audioDuration - fadeDuration);
       execSync(
-        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -t ${audioDuration.toFixed(2)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -shortest -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -t ${audioDuration.toFixed(2)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=0.15,afade=t=out:st=${fadeStart.toFixed(2)}:d=${fadeDuration.toFixed(2)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -t ${audioDuration.toFixed(2)} -movflags +faststart "${outMp4}"`,
         { timeout: 45000 }
       );
 
