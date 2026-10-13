@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -356,6 +356,15 @@ async function runAllTests() {
     assert.equal(lrcParsed.length, 2);
     assert.equal(lrcParsed[0].time, 1.5);
     assert.equal(lrcParsed[0].text, 'baris lirik satu');
+
+    assert.equal(sanitizeLrcMeta('The Cure\u0000The Cure'), 'The Cure');
+    assert.equal(sanitizeLrcMeta('Coldplay\u0000BTS\u0000Coldplay'), 'Coldplay, BTS');
+
+    const lrcOffset = parseLrcLyrics('[00:01.50] \u0000baris lirik satu\n[00:05.20] baris lirik dua', -0.20);
+    assert.equal(lrcOffset.length, 2);
+    assert.equal(lrcOffset[0].time, 1.3);
+    assert.equal(lrcOffset[0].text, 'baris lirik satu');
+    assert.ok(!lrcOffset[0].text.includes('\u0000'));
 
     const sampleSegments = [
       { time: 5, text: 'intro verse satu' },

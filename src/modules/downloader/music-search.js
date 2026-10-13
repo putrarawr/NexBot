@@ -141,7 +141,9 @@ async function safeUnlink(...filePaths) {
 }
 
 export async function downloadMusicTrack(target, metadata = {}) {
-  let searchTerm = String(target || '').trim();
+  let searchTerm = String(target || '').replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+  if (metadata.title) metadata.title = String(metadata.title).replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+  if (metadata.artist) metadata.artist = String(metadata.artist).replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
   let spotifyMeta = null;
   let itunesMeta = null;
   const isSpotifyUrl = /spotify\.com\/track\/[a-zA-Z0-9]+/i.test(searchTerm);
