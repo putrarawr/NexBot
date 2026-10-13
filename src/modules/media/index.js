@@ -1615,13 +1615,13 @@ export async function generateBratVideoMp4({
     const searchTarget = `${lyricsData.artistName} - ${lyricsData.trackName}`;
     let musicTrack = null;
     try {
-      musicTrack = await downloadMusicTrack(searchTarget, {
+      musicTrack = await downloadMusicTrack(`ytsearch1:${searchTarget} audio`, {
         targetDuration: lyricsData.duration,
         title: lyricsData.trackName,
         artist: lyricsData.artistName,
       });
     } catch {
-      musicTrack = await downloadMusicTrack(cleanQuery, {
+      musicTrack = await downloadMusicTrack(`ytsearch1:${cleanQuery} audio`, {
         targetDuration: lyricsData.duration,
       });
     }
