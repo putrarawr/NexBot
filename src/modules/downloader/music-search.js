@@ -165,7 +165,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
     if (cleanSearch) {
       try {
         const itunesRes = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearch)}&entity=song&limit=1`, {
-          signal: AbortSignal.timeout(6000),
+          signal: AbortSignal.timeout(3500),
         });
         if (itunesRes.ok) {
           const itunesJson = await itunesRes.json();

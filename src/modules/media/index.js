@@ -1508,13 +1508,25 @@ export async function fetchLyricsPlus(title, artist = '') {
   return null;
 }
 
+export function extractCleanTrackTitle(rawTrack) {
+  return String(rawTrack || '')
+    .replace(/\s*[\(\[](?:feat|ft|with|prod|remaster|version)\b.*?[\]\)]/gi, '')
+    .replace(/\s*[-–—]\s*(?:feat|ft|with)\b.*/gi, '')
+    .trim();
+}
+
+export function normalizeFuzzy(str) {
+  return String(str || '').toLowerCase().replace(/!/g, 'i').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export async function fetchSongLyricsWithSync(query) {
   const clean = sanitizeLrcMeta(query);
   if (!clean) return null;
 
   const cleanSearchTerm = clean.replace(/[-–—|/]/g, ' ').replace(/\s+/g, ' ').trim();
+  const searchTokens = normalizeFuzzy(cleanSearchTerm).split(/\s+/).filter((t) => t.length > 1);
 
-  // Deteksi kemungkinan pasangan Judul dan Artis dari format pemisah (misal "Judul - Artis" atau "Artis - Judul")
+  // Deteksi kemungkinan format pemisah "Judul - Artis" atau "Artis - Judul"
   const rawParts = clean.split(/\s*[-–—|/]\s*|\s+by\s+|\s+feat\.?\s+|\s+ft\.?\s+/i).map((s) => s.trim()).filter(Boolean);
   const userCand1 = rawParts.length >= 2 ? { track: rawParts[0], artist: rawParts.slice(1).join(' ') } : null;
   const userCand2 = rawParts.length >= 2 ? { track: rawParts[rawParts.length - 1], artist: rawParts.slice(0, -1).join(' ') } : null;
@@ -1522,15 +1534,16 @@ export async function fetchSongLyricsWithSync(query) {
   let canonicalTrack = cleanSearchTerm;
   let canonicalArtist = '';
   let canonicalDuration = 0;
+  let itunesFallbackItem = null;
 
-  // 1. Coba cari metadata lagu di iTunes (ID store + Global store secara paralel)
+  // 1. Coba cari metadata lagu di iTunes (ID store + Global store)
   try {
     const itunesU1 = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearchTerm)}&country=id&entity=song&limit=8`;
     const itunesU2 = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearchTerm)}&entity=song&limit=8`;
 
     const [resId, resGlobal] = await Promise.all([
-      fetch(itunesU1, { signal: AbortSignal.timeout(4500) }).then((r) => r.json()).catch(() => ({ results: [] })),
-      fetch(itunesU2, { signal: AbortSignal.timeout(4500) }).then((r) => r.json()).catch(() => ({ results: [] })),
+      fetch(itunesU1, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
+      fetch(itunesU2, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
     ]);
 
     const itunesMap = new Map();
@@ -1542,32 +1555,54 @@ export async function fetchSongLyricsWithSync(query) {
     const combinedItunes = Array.from(itunesMap.values());
 
     if (combinedItunes.length > 0) {
-      const tokens = cleanSearchTerm.toLowerCase().split(/[^a-z0-9]+/i).filter((t) => t.length > 1);
+      const scoredItunes = combinedItunes.map((item, idx) => {
+        let score = Math.max(0, 35 - idx * 4);
+        const rawTrack = String(item.trackName || '');
+        const cleanTrack = extractCleanTrackTitle(rawTrack);
+        const normTrack = normalizeFuzzy(cleanTrack);
+        const normArtist = normalizeFuzzy(item.artistName);
+        const combinedText = `${rawTrack} ${item.artistName || ''}`.toLowerCase();
 
-      const scoredItunes = combinedItunes.map((item) => {
-        let score = 0;
-        const itemTrack = (item.trackName || '').toLowerCase();
-        const itemArtist = (item.artistName || '').toLowerCase();
-        const combinedText = `${itemTrack} ${itemArtist}`;
+        let trackMatches = 0;
+        let artistMatches = 0;
+        for (const tok of searchTokens) {
+          if (normTrack.includes(tok)) {
+            score += 30;
+            trackMatches++;
+          }
+          if (normArtist.includes(tok)) {
+            score += 20;
+            artistMatches++;
+          }
+        }
 
-        for (const tok of tokens) {
-          if (itemTrack.includes(tok)) score += 20;
-          if (itemArtist.includes(tok)) score += 20;
+        // Jika query 2+ kata dan trackMatches 0, beri penalti
+        if (searchTokens.length >= 2 && trackMatches === 0 && !userCand1 && !userCand2) {
+          score -= 75;
+        }
+
+        // Jika query 3+ kata dan artistMatches 0, beri penalti agar artis lain tidak menang
+        if (searchTokens.length >= 3 && artistMatches === 0) {
+          score -= 60;
         }
 
         if (userCand1) {
-          if (itemTrack.includes(userCand1.track.toLowerCase())) score += 35;
-          if (itemArtist.includes(userCand1.artist.toLowerCase())) score += 35;
+          if (normTrack.includes(normalizeFuzzy(userCand1.track))) score += 40;
+          if (normArtist.includes(normalizeFuzzy(userCand1.artist))) score += 35;
         }
         if (userCand2) {
-          if (itemTrack.includes(userCand2.track.toLowerCase())) score += 35;
-          if (itemArtist.includes(userCand2.artist.toLowerCase())) score += 35;
+          if (normTrack.includes(normalizeFuzzy(userCand2.track))) score += 40;
+          if (normArtist.includes(normalizeFuzzy(userCand2.artist))) score += 35;
         }
 
-        if (/\b(karaoke|instrumental|tribute|backing track|originally performed by)\b/i.test(combinedText)) score -= 80;
-        if (/\b(cover|parodi|parody)\b/i.test(combinedText)) score -= 40;
+        const modifiers = ['lofi', 'remix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
+        for (const mod of modifiers) {
+          if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combinedText)) {
+            score -= 55;
+          }
+        }
 
-        return { item, score };
+        return { item, score, trackMatches, artistMatches };
       }).sort((a, b) => b.score - a.score);
 
       const bestItunes = scoredItunes[0]?.item;
@@ -1575,17 +1610,24 @@ export async function fetchSongLyricsWithSync(query) {
         canonicalTrack = sanitizeLrcMeta(bestItunes.trackName) || cleanSearchTerm;
         canonicalArtist = sanitizeLrcMeta(bestItunes.artistName);
         canonicalDuration = (bestItunes.trackTimeMillis || 0) / 1000;
+      } else if (bestItunes && scoredItunes[0].artistMatches > 0) {
+        // Jika artis cocok tapi judul tidak cocok langsung, simpan sebagai fallback
+        itunesFallbackItem = {
+          track: sanitizeLrcMeta(bestItunes.trackName),
+          artist: sanitizeLrcMeta(bestItunes.artistName),
+          duration: (bestItunes.trackTimeMillis || 0) / 1000,
+        };
+        canonicalArtist = sanitizeLrcMeta(bestItunes.artistName);
       }
     }
   } catch {}
 
-  // Jika iTunes tidak menemukan artis tetapi ada pemisah tanda hubung dari pengguna, gunakan kandidat pengguna
   if (!canonicalArtist && userCand1) {
     canonicalTrack = userCand1.track;
     canonicalArtist = userCand1.artist;
   }
 
-  const baseTrack = canonicalTrack.replace(/\(.*?\)|\[.*?\]/g, '').trim();
+  const baseTrack = extractCleanTrackTitle(canonicalTrack.replace(/\(.*?\)|\[.*?\]/g, '').trim());
   const baseArtist = canonicalArtist.split(/[,&]/)[0].trim();
 
   // 2. Coba cari word-by-word synced lyrics dari LyricsPlus (Apple Music/Spotify official sync)
@@ -1597,8 +1639,9 @@ export async function fetchSongLyricsWithSync(query) {
   if (userCand2) {
     plusTryList.push({ track: userCand2.track, artist: userCand2.artist });
   }
-  if (plusTryList.length === 0) {
-    plusTryList.push({ track: cleanSearchTerm, artist: '' });
+  plusTryList.push({ track: cleanSearchTerm, artist: '' });
+  if (itunesFallbackItem) {
+    plusTryList.push({ track: itunesFallbackItem.track, artist: itunesFallbackItem.artist });
   }
 
   let plusFallback = null;
@@ -1644,81 +1687,76 @@ export async function fetchSongLyricsWithSync(query) {
     } catch {}
   }
 
-  // 3. Fallback: Cari di LRCLIB (metode direct get dan query search)
-  const candidatesLrc = [];
+  // 3. Fallback: Cari di LRCLIB (metode direct get dan query search paralel)
+  const rawLrcList = [];
+  const seenLrcIds = new Set();
 
-  // 3a. Coba direct get jika track dan artist teridentifikasi
+  const addLrcItem = (item) => {
+    if (item && item.id && !seenLrcIds.has(item.id)) {
+      seenLrcIds.add(item.id);
+      rawLrcList.push(item);
+    }
+  };
+
+  // 3a. Direct get LRCLIB
   const lrcGetPairs = [];
   if (baseTrack && baseArtist) lrcGetPairs.push({ track: baseTrack, artist: baseArtist });
   if (userCand1) lrcGetPairs.push({ track: userCand1.track, artist: userCand1.artist });
   if (userCand2) lrcGetPairs.push({ track: userCand2.track, artist: userCand2.artist });
+  if (itunesFallbackItem) lrcGetPairs.push({ track: itunesFallbackItem.track, artist: itunesFallbackItem.artist });
 
   for (const pair of lrcGetPairs) {
     try {
       const getUrl = `https://lrclib.net/api/get?track_name=${encodeURIComponent(pair.track)}&artist_name=${encodeURIComponent(pair.artist)}`;
       const getRes = await fetch(getUrl, {
         headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
-        signal: AbortSignal.timeout(4000),
+        signal: AbortSignal.timeout(3500),
       });
       if (getRes.ok) {
         const item = await getRes.json();
-        if (item && item.syncedLyrics) {
-          return {
-            trackName: item.trackName || canonicalTrack,
-            artistName: item.artistName || canonicalArtist || 'Unknown Artist',
-            albumName: item.albumName,
-            duration: item.duration || canonicalDuration || 0,
-            syncedLyrics: item.syncedLyrics,
-            plainLyrics: item.plainLyrics || '',
-            hasWordSync: false,
-          };
+        addLrcItem(item);
+      }
+    } catch {}
+  }
+
+  // 3b. Search queries di LRCLIB secara paralel
+  const searchQueries = [];
+  searchQueries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanSearchTerm)}`);
+
+  if (baseArtist && baseTrack) {
+    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}&artist_name=${encodeURIComponent(baseArtist)}`);
+  }
+  if (userCand1) {
+    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(userCand1.track)}&artist_name=${encodeURIComponent(userCand1.artist)}`);
+  }
+  if (userCand2) {
+    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(userCand2.track)}&artist_name=${encodeURIComponent(userCand2.artist)}`);
+  }
+  if (baseTrack && baseTrack !== cleanSearchTerm) {
+    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}`);
+  }
+  if (itunesFallbackItem) {
+    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(itunesFallbackItem.track)}&artist_name=${encodeURIComponent(itunesFallbackItem.artist)}`);
+  }
+
+  const lrcFetches = searchQueries.map(async (u) => {
+    try {
+      const r = await fetch(u, {
+        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+        signal: AbortSignal.timeout(4500),
+      });
+      if (r.ok) {
+        const list = await r.json();
+        if (Array.isArray(list)) {
+          for (const item of list) addLrcItem(item);
         }
       }
     } catch {}
-  }
+  });
+  await Promise.allSettled(lrcFetches);
 
-  // 3b. Coba search query di LRCLIB
-  if (baseArtist) {
-    try {
-      const u1 = `https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}&artist_name=${encodeURIComponent(baseArtist)}`;
-      const r = await fetch(u1, {
-        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (r.ok) {
-        const list = await r.json();
-        if (Array.isArray(list)) candidatesLrc.push(...list);
-      }
-    } catch {}
-  }
-
-  if (candidatesLrc.length === 0) {
-    try {
-      const u2 = `https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}`;
-      const r = await fetch(u2, {
-        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (r.ok) {
-        const list = await r.json();
-        if (Array.isArray(list)) candidatesLrc.push(...list);
-      }
-    } catch {}
-  }
-
-  if (candidatesLrc.length === 0) {
-    try {
-      const u3 = `https://lrclib.net/api/search?q=${encodeURIComponent(cleanSearchTerm)}`;
-      const r = await fetch(u3, {
-        headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (r.ok) {
-        const list = await r.json();
-        if (Array.isArray(list)) candidatesLrc.push(...list);
-      }
-    } catch {}
-  }
+  // Filter kandidat yang MEMILIKI LIRIK (syncedLyrics atau plainLyrics)
+  const candidatesLrc = rawLrcList.filter((item) => item && (item.syncedLyrics || item.plainLyrics));
 
   if (candidatesLrc.length > 0) {
     candidatesLrc.forEach((item) => {
@@ -1735,46 +1773,57 @@ export async function fetchSongLyricsWithSync(query) {
 
     const scored = candidatesLrc.map((item) => {
       let score = 0;
-      if (item.syncedLyrics) score += 60;
+      if (item.syncedLyrics) score += 70;
       else if (item.plainLyrics) score += 20;
 
-      const itemTrack = (item.trackName || '').toLowerCase();
-      const itemArtist = (item.artistName || '').toLowerCase();
-      const combined = `${itemTrack} ${itemArtist}`;
+      const rawItemTrack = String(item.trackName || '');
+      const cleanItemTrack = extractCleanTrackTitle(rawItemTrack);
+      const normItemTrack = normalizeFuzzy(cleanItemTrack);
+      const normItemArtist = normalizeFuzzy(item.artistName);
+      const combined = `${rawItemTrack} ${item.artistName || ''}`.toLowerCase();
 
-      if (/\b(karaoke|instrumental|tribute|backing track|originally performed by)\b/i.test(combined)) score -= 70;
-      if (/\b(cover|parodi|parody)\b/i.test(combined)) score -= 45;
+      // Penalti cover, karaoke, remix
+      const modifiers = ['lofi', 'remix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
+      for (const mod of modifiers) {
+        if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combined)) {
+          score -= 60;
+        }
+      }
 
+      // Skor kecocokan durasi (jika durasi canonical dari iTunes tersedia)
       if (canonicalDuration > 0 && item.duration) {
         const diff = Math.abs(item.duration - canonicalDuration);
-        if (diff < 4) score += 50;
-        else if (diff < 12) score += 25;
-        else if (diff > 35) score -= 25;
+        if (diff < 4) score += 35;
+        else if (diff < 12) score += 20;
+        else if (diff > 40) score -= 25;
       }
 
+      // Skor kecocokan artist resmi
       if (baseArtist) {
-        const bArtistLower = baseArtist.toLowerCase();
-        if (itemArtist === bArtistLower) score += 50;
-        else if (itemArtist.includes(bArtistLower) || bArtistLower.includes(itemArtist)) score += 35;
+        const bArtistNorm = normalizeFuzzy(baseArtist);
+        if (normItemArtist === bArtistNorm) score += 40;
+        else if (normItemArtist.includes(bArtistNorm) || bArtistNorm.includes(normItemArtist)) score += 25;
       }
 
+      // Skor kecocokan track resmi
       if (baseTrack) {
-        const bTrackLower = baseTrack.toLowerCase();
-        if (itemTrack === bTrackLower) score += 50;
-        else if (itemTrack.includes(bTrackLower) || bTrackLower.includes(itemTrack)) score += 30;
+        const bTrackNorm = normalizeFuzzy(baseTrack);
+        if (normItemTrack === bTrackNorm) score += 45;
+        else if (normItemTrack.includes(bTrackNorm) || bTrackNorm.includes(normItemTrack)) score += 25;
       }
 
-      const tokens = cleanSearchTerm.toLowerCase().split(/[^a-z0-9]+/i).filter((t) => t.length > 1);
-      for (const tok of tokens) {
-        if (combined.includes(tok)) score += 8;
+      // Skor kecocokan token pencarian pengguna
+      for (const tok of searchTokens) {
+        if (normItemTrack.includes(tok)) score += 18;
+        if (normItemArtist.includes(tok)) score += 15;
       }
 
       return { item, score };
     });
 
     scored.sort((a, b) => b.score - a.score);
-    const match = scored[0]?.item;
-    if (match && (match.syncedLyrics || match.plainLyrics)) {
+    const match = scored.find((s) => s.item && (s.item.syncedLyrics || s.item.plainLyrics))?.item;
+    if (match) {
       return {
         trackName: match.trackName || canonicalTrack,
         artistName: match.artistName || canonicalArtist || 'Unknown Artist',
