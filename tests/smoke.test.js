@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -372,6 +372,20 @@ async function runAllTests() {
     const wPassing = estimateWordWeight('the', false);
     const wMulti = estimateWordWeight('berdiri', true);
     assert.ok(wMulti > wPassing, 'Multi-syllable sustained word must have higher weight than passing word');
+
+    const sampleSyllables = [
+      { time: 1000, duration: 200, text: 'hel' },
+      { time: 1200, duration: 300, text: 'lo ' },
+      { time: 1500, duration: 400, text: 'world' },
+    ];
+    const grouped = groupSyllablesToWords(sampleSyllables);
+    assert.equal(grouped.length, 2);
+    assert.equal(grouped[0].word, 'hello');
+    assert.equal(grouped[0].time, 1.0);
+    assert.equal(grouped[0].duration, 0.5);
+    assert.equal(grouped[1].word, 'world');
+    assert.equal(grouped[1].time, 1.5);
+    assert.equal(grouped[1].duration, 0.4);
 
     const sampleSegments = [
       { time: 5, text: 'intro verse satu' },

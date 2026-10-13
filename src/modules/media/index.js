@@ -827,11 +827,15 @@ export function registerMediaCommands() {
         lyricSearch = lirikMatch[2].trim();
       }
 
-      let syncOffset = 0.25;
+      let syncOffset = 0.20;
+      let isCustomOffset = false;
       const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
       if (offsetMatch) {
         const parsedOffset = parseFloat(offsetMatch[1]);
-        if (!isNaN(parsedOffset)) syncOffset = parsedOffset;
+        if (!isNaN(parsedOffset)) {
+          syncOffset = parsedOffset;
+          isCustomOffset = true;
+        }
       }
 
       let theme = '';
@@ -905,14 +909,17 @@ export function registerMediaCommands() {
             lyricSearch,
             isLineMode,
             syncOffset,
+            isCustomOffset,
           });
 
+          const syncTypeLabel = result.hasWordSync ? 'Suku Kata (Apple Music)' : 'Baris Tersinkronisasi';
           const caption =
             `*[ BRAT LYRIC VIDEO ]*\n\n` +
             `Judul: *${result.trackName}*\n` +
             `Artis: *${result.artistName}*\n` +
             `Bagian: *${result.partLabel}*\n` +
-            `Durasi: *${result.duration.toFixed(1)} detik*\n\n` +
+            `Durasi: *${result.duration.toFixed(1)} detik*\n` +
+            `Sinkronisasi: *${syncTypeLabel}*\n\n` +
             `Lirik tersinkronisasi otomatis dengan audio lagu.`;
 
           await sock.sendMessage(jid, {
@@ -1387,6 +1394,81 @@ export function getAudioDuration(audioPath) {
   }
 }
 
+export function groupSyllablesToWords(syllabus) {
+  if (!Array.isArray(syllabus) || syllabus.length === 0) return [];
+  const words = [];
+  let curWord = '';
+  let curStart = null;
+  let curDuration = 0;
+
+  for (let i = 0; i < syllabus.length; i++) {
+    const s = syllabus[i];
+    if (curStart === null) curStart = s.time;
+    curWord += s.text;
+    curDuration += s.duration || 0;
+
+    if (s.text.endsWith(' ') || s.text.endsWith('\t') || i === syllabus.length - 1) {
+      const cleanWord = curWord.trim();
+      if (cleanWord) {
+        words.push({
+          word: cleanWord,
+          time: curStart / 1000,
+          duration: curDuration / 1000,
+        });
+      }
+      curWord = '';
+      curStart = null;
+      curDuration = 0;
+    }
+  }
+
+  return words;
+}
+
+export async function fetchLyricsPlus(title, artist = '') {
+  const cleanTitle = (title || '').trim();
+  if (!cleanTitle) return null;
+
+  const mirrors = [
+    'https://lyricsplus.binimum.org',
+    'https://lyricsplus.prjktla.my.id',
+    'https://lyricsplus.atomix.one',
+  ];
+
+  const queries = [];
+  queries.push({ title: cleanTitle, artist: (artist || '').trim() });
+  if (artist && cleanTitle.includes(artist)) {
+    queries.push({ title: cleanTitle.replace(artist, '').replace(/[-–]/g, '').trim(), artist: artist.trim() });
+  }
+
+  for (const q of queries) {
+    if (!q.title) continue;
+    const promises = mirrors.map(async (m) => {
+      const url = `${m}/v2/lyrics/get?title=${encodeURIComponent(q.title)}${q.artist ? `&artist=${encodeURIComponent(q.artist)}` : ''}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const data = await res.json();
+      if (!data?.lyrics || !Array.isArray(data.lyrics) || data.lyrics.length === 0) {
+        throw new Error('no lyrics');
+      }
+      return data;
+    });
+
+    try {
+      const result = await Promise.any(promises);
+      const hasWordSync = result.lyrics.some((l) => Array.isArray(l.syllabus) && l.syllabus.length > 0);
+      return {
+        type: result.type,
+        hasWordSync,
+        metadata: result.metadata,
+        lyrics: result.lyrics,
+      };
+    } catch {}
+  }
+
+  return null;
+}
+
 export async function fetchSongLyricsWithSync(query) {
   const clean = sanitizeLrcMeta(query);
   if (!clean) return null;
@@ -1402,9 +1484,17 @@ export async function fetchSongLyricsWithSync(query) {
     if (itunesRes.ok) {
       const itunesData = await itunesRes.json();
       if (itunesData.results && itunesData.results.length > 0) {
-        canonicalTrack = sanitizeLrcMeta(itunesData.results[0].trackName) || clean;
-        canonicalArtist = sanitizeLrcMeta(itunesData.results[0].artistName);
-        canonicalDuration = (itunesData.results[0].trackTimeMillis || 0) / 1000;
+        let bestItem = itunesData.results[0];
+        const qLower = clean.toLowerCase();
+        for (const item of itunesData.results) {
+          if (item.trackName?.toLowerCase() === qLower) {
+            bestItem = item;
+            break;
+          }
+        }
+        canonicalTrack = sanitizeLrcMeta(bestItem.trackName) || clean;
+        canonicalArtist = sanitizeLrcMeta(bestItem.artistName);
+        canonicalDuration = (bestItem.trackTimeMillis || 0) / 1000;
       }
     }
   } catch {}
@@ -1412,9 +1502,44 @@ export async function fetchSongLyricsWithSync(query) {
   const baseTrack = canonicalTrack.replace(/\(.*?\)|\[.*?\]/g, '').trim();
   const baseArtist = canonicalArtist.split(/[,&]/)[0].trim();
 
+  // 2. Coba cari word-by-word synced lyrics dari LyricsPlus (Apple Music/Spotify official sync)
+  try {
+    const plusData = await fetchLyricsPlus(baseTrack, baseArtist);
+    if (plusData && plusData.hasWordSync) {
+      const wordSegments = plusData.lyrics
+        .map((l) => {
+          const rawText = (l.text || '').replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+          return {
+            time: l.time / 1000,
+            duration: (l.duration || 0) / 1000,
+            text: rawText,
+            words: groupSyllablesToWords(l.syllabus),
+          };
+        })
+        .filter((s) => s.text && s.text.length > 0 && !/^\[.*?\]$/.test(s.text));
+
+      if (wordSegments.length > 0) {
+        return {
+          trackName: canonicalTrack,
+          artistName: canonicalArtist || 'Unknown Artist',
+          albumName: plusData.metadata?.album || '',
+          duration: canonicalDuration || (plusData.metadata?.duration_ms ? plusData.metadata.duration_ms / 1000 : 0),
+          hasWordSync: true,
+          wordSegments,
+          syncedLyrics: wordSegments.map((s) => {
+            const m = Math.floor(s.time / 60);
+            const sec = (s.time % 60).toFixed(2);
+            return `[${String(m).padStart(2, '0')}:${String(sec).padStart(5, '0')}] ${s.text}`;
+          }).join('\n'),
+          plainLyrics: wordSegments.map((s) => s.text).join('\n'),
+        };
+      }
+    }
+  } catch {}
+
   let items = [];
 
-  // 2. Cari di LRCLIB dengan track dan artist teridentifikasi
+  // 3. Fallback: Cari di LRCLIB dengan track dan artist teridentifikasi
   if (baseArtist) {
     try {
       const u1 = `https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}&artist_name=${encodeURIComponent(baseArtist)}`;
@@ -1709,7 +1834,8 @@ export async function generateBratVideoMp4({
   lyricSearch = '',
   isLineMode = false,
   isTypingEffect = false,
-  syncOffset = 0.25,
+  syncOffset = 0.20,
+  isCustomOffset = false,
 } = {}) {
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery) {
@@ -1719,11 +1845,26 @@ export async function generateBratVideoMp4({
       throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
     }
 
-    if (!lyricsData.syncedLyrics) {
-      throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
+    let segments;
+    if (lyricsData.hasWordSync && Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.length > 0) {
+      // Offset kata: Jika pengguna memasukkan offset kustom (-offset), gunakan nilai tersebut.
+      // Jika default, lead offset -0.04s agar kata muncul tepat saat attack nada vokal dibunyikan.
+      const actualOffset = isCustomOffset ? syncOffset : -0.04;
+      segments = lyricsData.wordSegments.map((ws) => ({
+        ...ws,
+        time: Math.max(0, ws.time + actualOffset),
+        words: (ws.words || []).map((w) => ({
+          ...w,
+          time: Math.max(0, w.time + actualOffset),
+        })),
+      }));
+    } else {
+      if (!lyricsData.syncedLyrics) {
+        throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
+      }
+      segments = parseLrcLyrics(lyricsData.syncedLyrics, syncOffset);
     }
 
-    const segments = parseLrcLyrics(lyricsData.syncedLyrics, syncOffset);
     if (segments.length === 0) {
       throw new Error(`Format lirik lagu "${lyricsData.trackName}" tidak dapat diproses.`);
     }
@@ -1793,60 +1934,96 @@ export async function generateBratVideoMp4({
       for (let i = 0; i < activeSegments.length; i++) {
         const cur = activeSegments[i];
         const next = activeSegments[i + 1];
-        const rawSegDur = next ? next.time - cur.time : 4.0;
-        const segDuration = next ? (isFull ? Math.max(0.5, rawSegDur) : Math.min(6.0, Math.max(0.5, rawSegDur))) : 4.0;
-        const totalLineFrames = Math.max(6, Math.round(segDuration * 24));
-        const lineText = cur.text + (theme ? ` ${theme}` : "");
+
+        // Kunci frame awal dan akhir setiap baris terhadap timeline absolut audio agar bebas drift kumulatif
+        const currentLineStartFrame = globalFrameCount;
+        let nextLineStartFrame;
+        if (next) {
+          nextLineStartFrame = Math.round((next.time - startTime) * 24);
+        } else {
+          const lastDur = cur.duration && cur.duration > 0 ? Math.max(3.0, cur.duration + 0.8) : 4.0;
+          nextLineStartFrame = currentLineStartFrame + Math.round(lastDur * 24);
+        }
+
+        const totalLineFrames = Math.max(6, nextLineStartFrame - currentLineStartFrame);
+        const lineText = cur.text + (theme ? ` ${theme}` : '');
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
-        if (!isLineMode && numWords > 1 && totalLineFrames >= 20) {
-          // Kata per kata muncul dengan kurva tempo alami dan animasi ease-out halus
-          const pauseFrames = Math.min(8, Math.max(2, Math.round(totalLineFrames * 0.07)));
-          const vocalFrames = totalLineFrames - pauseFrames;
+        const hasExactWords = !isLineMode && Boolean(cur.words && cur.words.length > 0);
 
-          const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
-            const isLast = idx === numWords - 1;
-            return estimateWordWeight(pw.word, isLast);
-          });
-          const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
+        if (!isLineMode && numWords > 1 && totalLineFrames >= 10) {
+          let wordFramesList = [];
 
-          let elapsedFrames = 0;
+          if (hasExactWords) {
+            // Path 1: Sinkronisasi presisi tinggi per nada vokal dari Apple Music / Spotify
+            const wordStartFrames = [currentLineStartFrame];
+            for (let wIdx = 1; wIdx < numWords; wIdx++) {
+              let targetTime;
+              if (wIdx < cur.words.length) {
+                targetTime = cur.words[wIdx].time;
+              } else {
+                const lastW = cur.words[cur.words.length - 1];
+                targetTime = lastW.time + (wIdx - cur.words.length + 1) * 0.35;
+              }
+              const rawF = Math.round((targetTime - startTime) * 24);
+              const minF = wordStartFrames[wIdx - 1] + 2;
+              const maxF = nextLineStartFrame - (numWords - wIdx) * 2;
+              const targetF = Math.min(Math.max(minF, rawF), Math.max(minF, maxF));
+              wordStartFrames.push(targetF);
+            }
+
+            for (let wIdx = 0; wIdx < numWords - 1; wIdx++) {
+              wordFramesList.push(Math.max(2, wordStartFrames[wIdx + 1] - wordStartFrames[wIdx]));
+            }
+            const usedSoFar = wordFramesList.reduce((a, b) => a + b, 0);
+            wordFramesList.push(Math.max(2, totalLineFrames - usedSoFar));
+          } else {
+            // Path 2: Fallback berbasis bobot suku kata dengan alokasi jendela aktif menyanyi
+            const pauseFrames = Math.max(3, Math.round(totalLineFrames * 0.18));
+            const vocalFrames = Math.max(numWords * 2, totalLineFrames - pauseFrames);
+
+            const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
+              const isLast = idx === numWords - 1;
+              return estimateWordWeight(pw.word, isLast);
+            });
+            const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
+
+            let elapsedFrames = 0;
+            for (let step = 1; step <= numWords; step++) {
+              const activeIdx = step - 1;
+              if (step === numWords) {
+                wordFramesList.push(Math.max(2, totalLineFrames - elapsedFrames));
+              } else {
+                const wf = Math.max(2, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
+                wordFramesList.push(wf);
+                elapsedFrames += wf;
+              }
+            }
+          }
+
+          // Render setiap kata dengan transisi ease-out halus dan solid hold
           for (let step = 1; step <= numWords; step++) {
             const visible = lineLayout.positionedWords.slice(0, step);
             const activeIdx = step - 1;
+            const wordFrames = wordFramesList[activeIdx];
 
-            let wordFrames;
-            if (step === numWords) {
-              wordFrames = Math.max(3, totalLineFrames - elapsedFrames);
-            } else {
-              wordFrames = Math.max(3, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
-              elapsedFrames += wordFrames;
-            }
-
-            // Animasi smooth multi-frame ease-out (gliding upward + opacity fade-in)
+            // Animasi halus: transisi opacity dan micro-glide tanpa patah-patah
             let transitions = [];
-            if (wordFrames >= 8) {
+            if (wordFrames >= 7) {
               transitions = [
-                { op: 0.20, dy: 7.5 },
-                { op: 0.55, dy: 3.8 },
-                { op: 0.82, dy: 1.5 },
-                { op: 0.95, dy: 0.4 },
+                { op: 0.25, dy: 1.5 },
+                { op: 0.55, dy: 0.8 },
+                { op: 0.85, dy: 0.3 },
               ];
-            } else if (wordFrames >= 5) {
+            } else if (wordFrames >= 4) {
               transitions = [
-                { op: 0.30, dy: 6.0 },
-                { op: 0.70, dy: 2.2 },
-                { op: 0.92, dy: 0.6 },
+                { op: 0.35, dy: 1.2 },
+                { op: 0.75, dy: 0.4 },
               ];
-            } else if (wordFrames >= 3) {
+            } else if (wordFrames >= 2) {
               transitions = [
-                { op: 0.45, dy: 4.0 },
-                { op: 0.85, dy: 1.2 },
-              ];
-            } else {
-              transitions = [
-                { op: 0.65, dy: 2.0 },
+                { op: 0.50, dy: 0.8 },
               ];
             }
 
@@ -1865,7 +2042,7 @@ export async function generateBratVideoMp4({
             pushFrame(solidPath, solidFrames);
           }
         } else {
-          // Mode baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
+          // Baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
           const lineSvg = renderBratSvg(lineLayout, lineLayout.positionedWords);
           const linePath = path.join(tmpDir, `base_line_${i}.png`);
           await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
@@ -1887,6 +2064,7 @@ export async function generateBratVideoMp4({
         artistName: lyricsData.artistName,
         duration: totalDuration,
         partLabel,
+        hasWordSync: Boolean(lyricsData.hasWordSync),
       };
     } finally {
       try {
