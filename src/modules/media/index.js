@@ -24,6 +24,9 @@ import {
   enhanceVideoHd,
 } from './enhancer.js';
 import { InlineKeyboard } from 'grammy';
+import { downloadMusicTrack } from '../downloader/music-search.js';
+
+const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export async function extractPhotoBuffer({ msg, ctx, platform }) {
   if (platform === 'telegram' && ctx) {
@@ -778,6 +781,108 @@ export function registerMediaCommands() {
       }
     },
   });
+
+  // 18. Command: Brat Video MP4 Generator (/bratmp4 / .bratmp4)
+  registerCommand({
+    name: 'bratmp4',
+    aliases: ['bratsong', 'bratlyric', 'bratmusic', 'vbratmp4', 'bratvmp4'],
+    category: 'media',
+    description: 'Membuat video MP4 lirik lagu sinkron audio atau teks animasi ala Brat',
+    usage: '/bratmp4 <judul lagu -song | teks kustom | balas audio>',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx, platform, command }) {
+      let text = fullText?.trim() || '';
+
+      // Cek balas audio atau voice note
+      const quotedAudio = await extractAudioBuffer({ msg, ctx, platform });
+
+      // Cek balas teks jika text kosong
+      const quotedText = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!text && quotedText && !quotedAudio) {
+        text = quotedText.conversation || quotedText.extendedTextMessage?.text || '';
+      }
+      if (!text && ctx?.message?.reply_to_message && !quotedAudio) {
+        text = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '';
+      }
+
+      const isSongCommand = command.toLowerCase() === 'bratsong' || command.toLowerCase() === 'bratlyric' || command.toLowerCase() === 'bratmusic';
+      const hasSongFlag = /-song\b|-lagu\b/i.test(text);
+      const isSongMode = isSongCommand || hasSongFlag;
+
+      let theme = '';
+      if (/-green\b/i.test(text)) theme = '-green';
+      else if (/-black\b/i.test(text)) theme = '-black';
+      else if (/-white\b/i.test(text)) theme = '-white';
+
+      const cleanedText = text
+        .replace(/-song\b/gi, '')
+        .replace(/-lagu\b/gi, '')
+        .replace(/-green\b/gi, '')
+        .replace(/-black\b/gi, '')
+        .replace(/-white\b/gi, '')
+        .trim();
+
+      if (!cleanedText && !quotedAudio) {
+        return reply(
+          `[!] Format penggunaan Brat Video MP4:\n\n` +
+          `1. Sinkron Lirik Lagu:\n` +
+          `<code>${prefix}bratmp4 -song Fix You Coldplay</code> atau <code>${prefix}bratsong Laskar Pelangi -green</code>\n\n` +
+          `2. Balas Audio/Voice Note:\n` +
+          `Balas pesan audio dengan <code>${prefix}bratmp4 baris satu / baris dua</code>\n\n` +
+          `3. Video Teks Kustom:\n` +
+          `<code>${prefix}bratmp4 kamu nanya tapi kamu ga dengerin</code>`
+        );
+      }
+
+      try {
+        if (isSongMode) {
+          await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik untuk "${cleanedText}"...`);
+          const result = await generateBratVideoMp4({
+            songQuery: cleanedText,
+            theme,
+          });
+
+          const caption =
+            `<b>[ BRAT LYRIC VIDEO ]</b>\n\n` +
+            `Judul: <b>${escapeHtml(result.trackName)}</b>\n` +
+            `Artis: <b>${escapeHtml(result.artistName)}</b>\n` +
+            `Durasi: <b>${result.duration.toFixed(1)} detik</b>\n\n` +
+            `Lirik tersinkronisasi otomatis dengan audio lagu.`;
+
+          await sock.sendMessage(jid, {
+            video: result.buffer,
+            caption,
+            mimetype: 'video/mp4',
+          });
+        } else if (quotedAudio) {
+          const result = await generateBratVideoMp4({
+            text: cleanedText || 'brat audio',
+            audioBuffer: quotedAudio,
+            theme,
+          });
+
+          await sock.sendMessage(jid, {
+            video: result.buffer,
+            caption: `<b>[ BRAT AUDIO VIDEO ]</b>\n\nVideo sinkronisasi audio berhasil dibuat (${result.duration.toFixed(1)}s).`,
+            mimetype: 'video/mp4',
+          });
+        } else {
+          const result = await generateBratVideoMp4({
+            text: cleanedText,
+            theme,
+          });
+
+          await sock.sendMessage(jid, {
+            video: result.buffer,
+            caption: `<b>[ BRAT MP4 VIDEO ]</b>\n\n"${escapeHtml(cleanedText)}"`,
+            mimetype: 'video/mp4',
+          });
+        }
+      } catch (err) {
+        logger.error('Error saat membuat brat mp4:', err.message);
+        await reply(`[!] Gagal membuat video Brat MP4: ${err.message}`);
+      }
+    },
+  });
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -903,7 +1008,7 @@ function ensureSystemFontInstalled() {
   } catch {}
 }
 
-function computeBratLayout(text) {
+export function computeBratLayout(text) {
   ensureSystemFontInstalled();
   const measure = getFontMeasure();
 
@@ -1126,6 +1231,328 @@ export async function generateBratVideoSticker(text) {
   }
 }
 
+function renderBratSvg(layout, visibleWords) {
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const textElements = visibleWords.map((pw) =>
+    `<text x="${pw.x}" y="${pw.y}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${layout.textColor}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`
+  );
+
+  return `
+    <svg width="${layout.canvasSize}" height="${layout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="bratBlur" x="-10%" y="-10%" width="120%" height="120%">
+          <feGaussianBlur stdDeviation="0.9" />
+        </filter>
+      </defs>
+      <rect width="100%" height="100%" fill="${layout.bg}" />
+      ${textElements.join('\n      ')}
+    </svg>
+  `;
+}
+
+export function getAudioDuration(audioPath) {
+  try {
+    const out = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const dur = parseFloat(out.trim());
+    return !isNaN(dur) && dur > 0 ? dur : 5.0;
+  } catch {
+    return 5.0;
+  }
+}
+
+export async function fetchSongLyricsWithSync(query) {
+  const clean = String(query || '').trim();
+  if (!clean) return null;
+  const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(clean)}`;
+  const res = await fetch(searchUrl, {
+    headers: { 'User-Agent': 'NexBot/1.0 (Mozilla/5.0)' },
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`LRC API status HTTP ${res.status}`);
+  const items = await res.json();
+  if (!Array.isArray(items) || items.length === 0) return null;
+  const match = items.find((i) => i.syncedLyrics) || items.find((i) => i.plainLyrics) || items[0];
+  return {
+    trackName: match.trackName,
+    artistName: match.artistName,
+    albumName: match.albumName,
+    duration: match.duration,
+    syncedLyrics: match.syncedLyrics || '',
+    plainLyrics: match.plainLyrics || '',
+  };
+}
+
+export function parseLrcLyrics(lrcString) {
+  if (!lrcString || typeof lrcString !== 'string') return [];
+  const lines = lrcString.split(/\r?\n/);
+  const result = [];
+  const timeRegex = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)/;
+
+  for (const line of lines) {
+    const match = timeRegex.exec(line.trim());
+    if (match) {
+      const minutes = parseInt(match[1], 10);
+      const seconds = parseFloat(match[2]);
+      const totalSeconds = minutes * 60 + seconds;
+      const text = match[3].trim();
+      if (text) {
+        result.push({
+          time: totalSeconds,
+          text,
+        });
+      }
+    }
+  }
+
+  result.sort((a, b) => a.time - b.time);
+  return result;
+}
+
+export async function generateBratVideoMp4({
+  text = '',
+  audioBuffer = null,
+  songQuery = '',
+  theme = '',
+} = {}) {
+  // Mode 1: Lagu dengan lirik sinkron otomatis
+  if (songQuery) {
+    const cleanQuery = songQuery.trim();
+    const lyricsData = await fetchSongLyricsWithSync(cleanQuery);
+    if (!lyricsData) {
+      throw new Error(`Lirik untuk lagu "${cleanQuery}" tidak ditemukan.`);
+    }
+
+    const musicTrack = await downloadMusicTrack(cleanQuery);
+    if (!musicTrack?.buffer) {
+      throw new Error(`Gagal mengunduh audio lagu "${cleanQuery}".`);
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nex_bratsong_'));
+    try {
+      const audioPath = path.join(tmpDir, 'track.mp3');
+      fs.writeFileSync(audioPath, musicTrack.buffer);
+
+      let segments = lyricsData.syncedLyrics ? parseLrcLyrics(lyricsData.syncedLyrics) : [];
+      if (segments.length === 0) {
+        const plainLines = lyricsData.plainLyrics
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0 && !l.startsWith('['));
+        const chosen = plainLines.slice(0, 8);
+        segments = chosen.map((t, idx) => ({ time: idx * 4.0, text: t }));
+      }
+
+      const firstLyricTime = segments[0].time;
+      const startTime = Math.max(0, firstLyricTime - 1.2);
+      const maxDuration = 35;
+      const activeSegments = segments.filter(
+        (s) => s.time >= startTime && s.time - startTime <= maxDuration
+      );
+      if (activeSegments.length === 0) activeSegments.push(segments[0]);
+
+      const concatEntries = [];
+      let frameCounter = 0;
+
+      const introDuration = activeSegments[0].time - startTime;
+      if (introDuration >= 0.8) {
+        const introText = `${lyricsData.trackName}\n${lyricsData.artistName}${theme ? ` ${theme}` : ''}`;
+        const introLayout = computeBratLayout(introText);
+        const introSvg = renderBratSvg(introLayout, introLayout.positionedWords);
+        const introPath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+        await sharp(Buffer.from(introSvg)).png().toFile(introPath);
+        concatEntries.push({ file: introPath, duration: introDuration.toFixed(3) });
+      }
+
+      for (let i = 0; i < activeSegments.length; i++) {
+        const cur = activeSegments[i];
+        const next = activeSegments[i + 1];
+        const segDuration = next ? Math.max(1.2, next.time - cur.time) : 4.0;
+        const lineText = cur.text + (theme ? ` ${theme}` : '');
+        const lineLayout = computeBratLayout(lineText);
+        const numWords = lineLayout.positionedWords.length;
+
+        if (numWords > 1) {
+          const typeDuration = Math.min(segDuration * 0.65, numWords * 0.35);
+          const stepDuration = Math.max(0.12, typeDuration / numWords);
+          const holdDuration = Math.max(0.5, segDuration - (stepDuration * (numWords - 1)));
+
+          for (let step = 1; step <= numWords; step++) {
+            const visible = lineLayout.positionedWords.slice(0, step);
+            const svg = renderBratSvg(lineLayout, visible);
+            const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+            await sharp(Buffer.from(svg)).png().toFile(framePath);
+            const dur = step === numWords ? holdDuration : stepDuration;
+            concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
+          }
+        } else {
+          const svg = renderBratSvg(lineLayout, lineLayout.positionedWords);
+          const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+          await sharp(Buffer.from(svg)).png().toFile(framePath);
+          concatEntries.push({ file: framePath, duration: segDuration.toFixed(3) });
+        }
+      }
+
+      const totalDuration = concatEntries.reduce((acc, e) => acc + parseFloat(e.duration), 0);
+      const listPath = path.join(tmpDir, 'list.txt');
+      const lines = [];
+      concatEntries.forEach((e) => {
+        lines.push(`file '${e.file}'`);
+        lines.push(`duration ${e.duration}`);
+      });
+      lines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
+      fs.writeFileSync(listPath, lines.join('\n'));
+
+      const outMp4 = path.join(tmpDir, 'output.mp4');
+      execSync(
+        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -ss ${startTime.toFixed(2)} -t ${totalDuration.toFixed(2)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -shortest -movflags +faststart "${outMp4}"`,
+        { timeout: 45000 }
+      );
+
+      return {
+        buffer: fs.readFileSync(outMp4),
+        trackName: lyricsData.trackName,
+        artistName: lyricsData.artistName,
+        duration: totalDuration,
+      };
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  // Mode 2: Balas audio / voice note
+  if (audioBuffer) {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nex_brataud_'));
+    try {
+      const audioPath = path.join(tmpDir, 'input_audio');
+      fs.writeFileSync(audioPath, audioBuffer);
+      const audioDuration = getAudioDuration(audioPath);
+
+      const rawText = String(text || '').trim();
+      const lines = rawText.includes('\n') || rawText.includes('/') || rawText.includes('|')
+        ? rawText.split(/[\r\n/|]+/).map((s) => s.trim()).filter(Boolean)
+        : [rawText];
+
+      const concatEntries = [];
+      let frameCounter = 0;
+      const durationPerLine = audioDuration / Math.max(1, lines.length);
+
+      for (let i = 0; i < lines.length; i++) {
+        const curLine = lines[i] + (theme ? ` ${theme}` : '');
+        const lineLayout = computeBratLayout(curLine);
+        const numWords = lineLayout.positionedWords.length;
+
+        if (numWords > 1) {
+          const typeDuration = Math.min(durationPerLine * 0.7, numWords * 0.35);
+          const stepDuration = Math.max(0.12, typeDuration / numWords);
+          const holdDuration = Math.max(0.4, durationPerLine - (stepDuration * (numWords - 1)));
+
+          for (let step = 1; step <= numWords; step++) {
+            const visible = lineLayout.positionedWords.slice(0, step);
+            const svg = renderBratSvg(lineLayout, visible);
+            const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+            await sharp(Buffer.from(svg)).png().toFile(framePath);
+            const dur = step === numWords ? holdDuration : stepDuration;
+            concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
+          }
+        } else {
+          const svg = renderBratSvg(lineLayout, lineLayout.positionedWords);
+          const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+          await sharp(Buffer.from(svg)).png().toFile(framePath);
+          concatEntries.push({ file: framePath, duration: durationPerLine.toFixed(3) });
+        }
+      }
+
+      const listPath = path.join(tmpDir, 'list.txt');
+      const concatLines = [];
+      concatEntries.forEach((e) => {
+        concatLines.push(`file '${e.file}'`);
+        concatLines.push(`duration ${e.duration}`);
+      });
+      concatLines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
+      fs.writeFileSync(listPath, concatLines.join('\n'));
+
+      const outMp4 = path.join(tmpDir, 'output.mp4');
+      execSync(
+        `ffmpeg -y -f concat -safe 0 -i "${listPath}" -t ${audioDuration.toFixed(2)} -i "${audioPath}" -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -shortest -movflags +faststart "${outMp4}"`,
+        { timeout: 45000 }
+      );
+
+      return {
+        buffer: fs.readFileSync(outMp4),
+        duration: audioDuration,
+      };
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  // Mode 3: Teks kustom murni (animasi video MP4)
+  const rawText = String(text || '').trim();
+  if (!rawText) {
+    throw new Error('Teks tidak boleh kosong.');
+  }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nex_bratmp4_'));
+  try {
+    const layout = computeBratLayout(rawText + (theme ? ` ${theme}` : ''));
+    const numWords = layout.positionedWords.length;
+    const concatEntries = [];
+    let frameCounter = 0;
+
+    if (numWords <= 1) {
+      const svg = renderBratSvg(layout, layout.positionedWords);
+      const framePath = path.join(tmpDir, 'frame_0001.png');
+      await sharp(Buffer.from(svg)).png().toFile(framePath);
+      concatEntries.push({ file: framePath, duration: '2.500' });
+    } else {
+      const typeDuration = Math.min(3.8, Math.max(1.2, numWords * 0.28));
+      const stepDuration = Math.max(0.14, typeDuration / numWords);
+      const holdDuration = 1.8;
+
+      for (let step = 1; step <= numWords; step++) {
+        const visible = layout.positionedWords.slice(0, step);
+        const svg = renderBratSvg(layout, visible);
+        const framePath = path.join(tmpDir, `frame_${String(++frameCounter).padStart(4, '0')}.png`);
+        await sharp(Buffer.from(svg)).png().toFile(framePath);
+        const dur = step === numWords ? holdDuration : stepDuration;
+        concatEntries.push({ file: framePath, duration: dur.toFixed(3) });
+      }
+    }
+
+    const listPath = path.join(tmpDir, 'list.txt');
+    const concatLines = [];
+    concatEntries.forEach((e) => {
+      concatLines.push(`file '${e.file}'`);
+      concatLines.push(`duration ${e.duration}`);
+    });
+    concatLines.push(`file '${concatEntries[concatEntries.length - 1].file}'`);
+    fs.writeFileSync(listPath, concatLines.join('\n'));
+
+    const outMp4 = path.join(tmpDir, 'output.mp4');
+    execSync(
+      `ffmpeg -y -f concat -safe 0 -i "${listPath}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 128k -shortest -movflags +faststart "${outMp4}"`,
+      { timeout: 30000 }
+    );
+
+    const totalDuration = concatEntries.reduce((acc, e) => acc + parseFloat(e.duration), 0);
+    return {
+      buffer: fs.readFileSync(outMp4),
+      duration: totalDuration,
+    };
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 export async function generateTtsAudio(text, lang = 'id') {
   const cleanText = text.trim().slice(0, 300);
   const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
@@ -1250,6 +1677,35 @@ export async function extractAnyMediaBuffer({ msg, ctx, platform }) {
       const fakeMsg = { key: { id: msg?.message?.extendedTextMessage?.contextInfo?.stanzaId }, message: quoted };
       const buf = await downloadMediaMessage(fakeMsg, 'buffer', {});
       return { buffer: buf, ext: 'mp3', mime: 'audio/mp4' };
+    }
+  }
+  return null;
+}
+
+export async function extractAudioBuffer({ msg, ctx, platform }) {
+  if (platform === 'telegram' && ctx) {
+    const target = ctx.message?.reply_to_message || ctx.message;
+    const aud = target?.audio || target?.voice;
+    if (aud) {
+      const file = await ctx.api.getFile(aud.file_id);
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+      return Buffer.from(await res.arrayBuffer());
+    }
+  } else if (msg) {
+    const quoted = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (quoted?.audioMessage) {
+      const fakeMsg = {
+        key: {
+          id: msg?.message?.extendedTextMessage?.contextInfo?.stanzaId,
+          remoteJid: msg?.key?.remoteJid,
+        },
+        message: quoted,
+      };
+      return await downloadMediaMessage(fakeMsg, 'buffer', {});
+    }
+    if (msg?.message?.audioMessage) {
+      return await downloadMediaMessage(msg, 'buffer', {});
     }
   }
   return null;

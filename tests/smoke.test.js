@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -175,7 +175,7 @@ async function runAllTests() {
       'ai', 'explain', 'summarize', 'translate', 'aiimg', 'vision',
       'run', 'regex', 'json', 'cheat',
       'sticker', 'toimg', 'qc', 'photolive', 'hd', 'contrast', 'vintage', 'noir', 'story', 'hdvid', 'filter',
-      'tts', 'tomp3', 'tourl', 'smeme', 'brat', 'bratvid',
+      'tts', 'tomp3', 'tourl', 'smeme', 'brat', 'bratvid', 'bratmp4',
       'tiktok', 'instagram', 'youtube', 'ytmp3', 'spotify', 'twitter', 'facebook', 'pinterest', 'down',
       'gempa', 'cuaca', 'sholat', 'wiki', 'short', 'unshort', 'calc', 'qrcode', 'ssweb', 'lirik',
       'hidetag', 'tagall', 'kick', 'add', 'promote', 'demote', 'group', 'linkgc', 'revoke', 'antilink', 'afk',
@@ -351,6 +351,16 @@ async function runAllTests() {
     assert.ok(bratVidWebp.length > 500, 'Brat video sticker buffer should be valid');
     assert.equal(bratVidWebp.subarray(8, 12).toString(), 'WEBP');
     assert.ok(bratVidWebp.includes(Buffer.from('nexusbot')), 'Brat video should contain nexusbot metadata');
+
+    const lrcParsed = parseLrcLyrics('[00:01.50] baris lirik satu\n[00:05.20] baris lirik dua');
+    assert.equal(lrcParsed.length, 2);
+    assert.equal(lrcParsed[0].time, 1.5);
+    assert.equal(lrcParsed[0].text, 'baris lirik satu');
+
+    const bratMp4Res = await generateBratVideoMp4({ text: 'kamu nanya tapi kamu ga dengerin -green' });
+    assert.ok(bratMp4Res.buffer.length > 1000, 'Brat MP4 video buffer should be valid');
+    assert.equal(bratMp4Res.buffer.subarray(4, 8).toString(), 'ftyp', 'Must be valid MP4 container');
+    assert.ok(bratMp4Res.duration > 0, 'Duration must be positive');
   });
 
   // 4d. Group Utility & AFK Tests
