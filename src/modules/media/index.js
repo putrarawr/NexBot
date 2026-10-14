@@ -2494,24 +2494,47 @@ export async function generateBratVideoMp4({
             const visible = lineLayout.positionedWords.slice(0, nextStepIdx);
             const activeIdx = nextStepIdx - 1;
 
-            if (durationFrames >= 2) {
-              // Frame 1: Micro-Pop Beat Punch (1 frame = 33ms) untuk hentakan dinamis pada ketukan vokal
+            // Transisi background smooth (1 frame blend) di awal baris baru jika warna layer berganti
+            const isFirstWordOfLine = (stepIdx === 0);
+            const bgBlendFactor = (isFirstWordOfLine && prevLayerBg !== curTheme.bg) ? 0.70 : 1.0;
+            const initialFrameBg = bgBlendFactor < 1.0
+              ? interpolateHexColor(prevLayerBg, curTheme.bg, bgBlendFactor)
+              : curTheme.bg;
+
+            if (durationFrames >= 3) {
+              // Frame 0: Punch-In (33ms) - Scale 1.08x, sedikit terangkat (-1.6px), opacity 0.95
               const popSvg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                1.0,
-                -1.2,
-                curTheme.bg,
+                0.95,
+                -1.6,
+                initialFrameBg,
                 curTheme.textColor,
                 0.9,
-                1.06
+                1.08
               );
-              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_pop.png`);
+              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p0.png`);
               await sharp(Buffer.from(popSvg)).png().toFile(popPath);
               pushFrame(popPath, 1);
 
-              // Sisa frame: Tampilan solid resting state yang stabil dan tajam
+              // Frame 1: Soft Ease-Out Settle (33ms) - Scale 1.03x, merapat ke baseline (-0.6px), opacity 1.0
+              const settleSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                -0.6,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.03
+              );
+              const settlePath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p1.png`);
+              await sharp(Buffer.from(settleSvg)).png().toFile(settlePath);
+              pushFrame(settlePath, 1);
+
+              // Sisa frame: Resting State (stabil, 100% solid, tajam)
               const solidSvg = renderBratSvg(
                 lineLayout,
                 visible,
@@ -2525,9 +2548,41 @@ export async function generateBratVideoMp4({
               );
               const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
               await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-              pushFrame(solidPath, durationFrames - 1);
+              pushFrame(solidPath, durationFrames - 2);
+            } else if (durationFrames === 2) {
+              // Frame 0: Punch-In cepat (33ms)
+              const popSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                -1.0,
+                initialFrameBg,
+                curTheme.textColor,
+                0.9,
+                1.05
+              );
+              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p0.png`);
+              await sharp(Buffer.from(popSvg)).png().toFile(popPath);
+              pushFrame(popPath, 1);
+
+              // Frame 1: Resting State (33ms)
+              const solidSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.0
+              );
+              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
+              pushFrame(solidPath, 1);
             } else {
-              // Jika hanya 1 frame (kata super cepat): langsung tampilkan solid state tanpa pop ganda
+              // 1 frame (kata super cepat): langsung resting state stabil
               const solidSvg = renderBratSvg(
                 lineLayout,
                 visible,
@@ -2548,19 +2603,50 @@ export async function generateBratVideoMp4({
           }
         } else {
           // Baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
-          const lineSvg = renderBratSvg(
-            lineLayout,
-            lineLayout.positionedWords,
-            -1,
-            1.0,
-            0.0,
-            curTheme.bg,
-            curTheme.textColor,
-            0.9
-          );
-          const linePath = path.join(tmpDir, `base_line_${i}.png`);
-          await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
-          pushFrame(linePath, totalLineFrames);
+          if (prevLayerBg !== curTheme.bg && totalLineFrames >= 3) {
+            const blendBg = interpolateHexColor(prevLayerBg, curTheme.bg, 0.70);
+            const blendSvg = renderBratSvg(
+              lineLayout,
+              lineLayout.positionedWords,
+              -1,
+              1.0,
+              0.0,
+              blendBg,
+              curTheme.textColor,
+              0.9
+            );
+            const blendPath = path.join(tmpDir, `base_line_${i}_blend.png`);
+            await sharp(Buffer.from(blendSvg)).png().toFile(blendPath);
+            pushFrame(blendPath, 1);
+
+            const solidSvg = renderBratSvg(
+              lineLayout,
+              lineLayout.positionedWords,
+              -1,
+              1.0,
+              0.0,
+              curTheme.bg,
+              curTheme.textColor,
+              0.9
+            );
+            const linePath = path.join(tmpDir, `base_line_${i}.png`);
+            await sharp(Buffer.from(solidSvg)).png().toFile(linePath);
+            pushFrame(linePath, totalLineFrames - 1);
+          } else {
+            const lineSvg = renderBratSvg(
+              lineLayout,
+              lineLayout.positionedWords,
+              -1,
+              1.0,
+              0.0,
+              curTheme.bg,
+              curTheme.textColor,
+              0.9
+            );
+            const linePath = path.join(tmpDir, `base_line_${i}.png`);
+            await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
+            pushFrame(linePath, totalLineFrames);
+          }
         }
 
         // Jika ada jeda hening/instrumental sebelum baris berikutnya, tahan teks baris ini hingga baris berikutnya mulai
