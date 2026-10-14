@@ -186,7 +186,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
       const cleanTerm = searchTerm.replace(/^(ytsearch\d*:|scsearch\d*:)/i, '').replace(/\baudio\b/gi, '').trim();
       const searchTargetCand = `ytsearch10:${cleanTerm} audio`;
       const printTemplate = '%(id)s\t%(duration)s\t%(title)s\t%(channel)s';
-      const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
+      const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings --extractor-args "youtube:player_client=android_creator,android,ios,web" ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
       const { stdout: candOut } = await execAsync(candCmd, { timeout: 20000 });
       const candLines = candOut.split(/\r?\n/).filter(Boolean);
       let bestId = null;
@@ -263,8 +263,8 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const searchTarget = resolvedSearchPrefixed
     ? searchTerm
     : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} official audio`;
-  const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
-  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android,web" ';
+  const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b/best" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
+  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android_creator,android,ios,web" ';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
@@ -278,10 +278,20 @@ export async function downloadMusicTrack(target, metadata = {}) {
       .replace(/^https?:\/\/[^\s]+/i, '')
       .trim() || cleanTerm;
     const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} official audio`)}`;
+    let youtubeOk = false;
     try {
       await execAsync(fallbackCmd, { timeout: 45000 });
-    } catch (fallbackErr) {
-      logger.warn('YouTube fallback failed, trying SoundCloud fallback:', fallbackErr.message);
+      youtubeOk = true;
+    } catch {
+      try {
+        const rawYtCmd = `yt-dlp ${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} audio`)}`;
+        await execAsync(rawYtCmd, { timeout: 40000 });
+        youtubeOk = true;
+      } catch {}
+    }
+
+    if (!youtubeOk) {
+      logger.warn('YouTube fallback failed, trying SoundCloud fallback');
       let scTarget = `scsearch1:${cleanFallback}`;
       if (metadata.targetDuration && Number(metadata.targetDuration) >= 60) {
         try {
@@ -314,7 +324,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
         await execAsync(scCmd, { timeout: 30000 });
       } catch (scErr) {
         logger.warn('SoundCloud fallback failed:', scErr.message);
-        throw new Error('Lagu tidak ditemukan atau ukuran terlalu besar.');
+        throw new Error('Gagal mengunduh audio lagu dari YouTube/SoundCloud (koneksi dibatasi penyedia atau audio dilindungi hak cipta).');
       }
     }
   }
