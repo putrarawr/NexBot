@@ -23,9 +23,10 @@ import {
   generateAestheticStoryVideo,
   enhanceVideoHd,
 } from './enhancer.js';
-import { InlineKeyboard } from 'grammy';
+import { InlineKeyboard, InputFile } from 'grammy';
 import { downloadMusicTrack } from '../downloader/music-search.js';
 import { levenshteinDistance } from '../../bot/autocomplete.js';
+import { generateSpotifyGlowVideoMp4 } from './spotify-glow.js';
 
 const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -965,6 +966,161 @@ export function registerMediaCommands() {
       } catch (err) {
         logger.error('Error saat membuat brat mp4:', err.message);
         await reply(`[!] Gagal membuat video Brat MP4: ${err.message}`);
+      }
+    },
+  });
+
+  // 17. Spotify Glow Lyric Video (.spotvid / .spotlyric / .glowvid)
+  registerCommand({
+    name: 'spotvid',
+    aliases: ['spotlyric', 'spotmp4', 'glowvid', 'lirikvid', 'spotilyric'],
+    category: 'media',
+    description: 'Membuat video MP4 lirik lagu aesthetic ala Spotify dengan teks neon glow',
+    usage: '/spotvid <judul lagu> [-reff|-rap|-intro|-full] [-cyan|-purple|-pink|-gold|-blue|-white] [-story]',
+    async execute({ sock, msg, jid, fullText, reply, prefix, ctx, platform }) {
+      let text = fullText?.trim() || '';
+
+      const quotedText = msg?.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+      if (!text && quotedText) {
+        text = quotedText.conversation || quotedText.extendedTextMessage?.text || '';
+      }
+      if (!text && ctx?.message?.reply_to_message) {
+        text = ctx.message.reply_to_message.text || ctx.message.reply_to_message.caption || '';
+      }
+
+      // Theme detection
+      let glowTheme = 'green';
+      if (/-cyan\b/i.test(text)) glowTheme = 'cyan';
+      else if (/-purple\b|-violet\b/i.test(text)) glowTheme = 'purple';
+      else if (/-pink\b|-magenta\b/i.test(text)) glowTheme = 'pink';
+      else if (/-gold\b|-yellow\b|-amber\b/i.test(text)) glowTheme = 'gold';
+      else if (/-blue\b/i.test(text)) glowTheme = 'blue';
+      else if (/-white\b/i.test(text)) glowTheme = 'white';
+
+      // Layout / Aspect Ratio
+      const isStory = /-story\b|-916\b|-vertical\b|-reels\b|-tiktok\b/i.test(text);
+
+      // Section flags
+      const isIntro = /-intro\b|-awal\b|-depan\b/i.test(text);
+      const isFull = /-full\b|-lengkap\b|-semua\b|\bfull lirik\b|\blirik full\b/i.test(text);
+      const isRap = /-rap\b/i.test(text);
+      const customReff = parseReffParam(text);
+      const isReff = Boolean(customReff);
+
+      let fromTime = null;
+      const fromMatch = /-(?:from|start|mulai)[:\s]+([0-9:.]+)/i.exec(text);
+      if (fromMatch) {
+        fromTime = parseTimeSeconds(fromMatch[1]);
+      }
+
+      let lyricSearch = '';
+      const lirikMatch = /(?:lirik:|-lirik\s+)(["']?)(.+?)\1(?:\s+-[a-z0-9]+|\s*$)/i.exec(text);
+      if (lirikMatch) {
+        lyricSearch = lirikMatch[2].trim();
+      }
+
+      let syncOffset = 0;
+      let isCustomOffset = false;
+      const offsetMatch = /-(?:offset|delay|lead)[:\s]+([-0-9.]+)/i.exec(text);
+      if (offsetMatch) {
+        const parsedOffset = parseFloat(offsetMatch[1]);
+        if (!isNaN(parsedOffset)) {
+          syncOffset = parsedOffset;
+          isCustomOffset = true;
+        }
+      }
+
+      let rawCleaned = text;
+      if (customReff && customReff.raw) {
+        rawCleaned = rawCleaned.replace(customReff.raw, ' ');
+      }
+      const cleanedText = rawCleaned
+        .replace(/-(?:from|start|mulai)[:\s]+[0-9:.]+/gi, ' ')
+        .replace(/-(?:offset|delay|lead)[:\s]+[-0-9.]+/gi, ' ')
+        .replace(/(?:lirik:|-lirik\s+)(["']?).+?\1(?:\s+-[a-z0-9]+|\s*$)/gi, ' ')
+        .replace(/-song\b|-lagu\b/gi, ' ')
+        .replace(/-full\b|-lengkap\b|-semua\b|\bfull lirik\b|\blirik full\b/gi, ' ')
+        .replace(/-intro\b|-awal\b|-depan\b/gi, ' ')
+        .replace(/-reff\b|-chorus\b|-ref\b/gi, ' ')
+        .replace(/-rap\b/gi, ' ')
+        .replace(/-story\b|-916\b|-vertical\b|-reels\b|-tiktok\b/gi, ' ')
+        .replace(/-cyan\b|-purple\b|-violet\b|-pink\b|-magenta\b|-gold\b|-yellow\b|-amber\b|-blue\b|-white\b|-green\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!cleanedText) {
+        return reply(
+          `[!] Format penggunaan Spotify Glow Video MP4:\n\n` +
+          `1. Otomatis Lirik Glow (Default Bagian Reff/Viral, Green):\n` +
+          `<code>${prefix}spotvid Fix You Coldplay</code> atau <code>${prefix}spotvid which one by drake ft. Central cee</code>\n\n` +
+          `2. Pilihan Warna Glow Neon:\n` +
+          `• Hijau Spotify: <code>${prefix}spotvid Judul Lagu -green</code>\n` +
+          `• Electric Cyan: <code>${prefix}spotvid Judul Lagu -cyan</code>\n` +
+          `• Cyber Violet: <code>${prefix}spotvid Judul Lagu -purple</code>\n` +
+          `• Neon Magenta: <code>${prefix}spotvid Judul Lagu -pink</code>\n` +
+          `• Sunset Gold: <code>${prefix}spotvid Judul Lagu -gold</code>\n` +
+          `• Diamond White: <code>${prefix}spotvid Judul Lagu -white</code>\n\n` +
+          `3. Request Bagian Lagu & Format:\n` +
+          `• Reff Urutan (1, 2, 3): <code>${prefix}spotvid Judul Lagu -reff 2</code>\n` +
+          `• Reff Terakhir: <code>${prefix}spotvid Judul Lagu -reff akhir</code>\n` +
+          `• Rap Cepat: <code>${prefix}spotvid Eminem Godzilla -rap</code>\n` +
+          `• Intro / Awal: <code>${prefix}spotvid Judul Lagu -intro</code>\n` +
+          `• Menit Tertentu: <code>${prefix}spotvid Judul Lagu -from 01:20</code>\n` +
+          `• Format Story 9:16: <code>${prefix}spotvid Judul Lagu -story</code>`
+        );
+      }
+
+      try {
+        const lyricsData = await fetchSongLyricsWithSync(cleanedText);
+        if (!lyricsData || (!lyricsData.syncedLyrics && !lyricsData.plainLyrics)) {
+          return reply(`[!] Lirik lagu tersinkronisasi tidak ditemukan untuk "${cleanedText}".`);
+        }
+
+        const normQuery = cleanedText.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normDetected = `${lyricsData?.trackName || ''} ${lyricsData?.artistName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const isCorrected = lyricsData?.trackName && normQuery.length >= 3 && !normDetected.includes(normQuery) && normDetected !== normQuery;
+
+        if (isCorrected) {
+          await reply(`[!] [Auto-Correct] Menemukan lagu: *${lyricsData.trackName}* oleh *${lyricsData.artistName || 'Artis'}*\n[!] Sedang menyinkronkan lirik dan membuat video Spotify Glow MP4...`);
+        } else {
+          await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik Spotify Glow untuk "${cleanedText}"...`);
+        }
+
+        const result = await generateSpotifyGlowVideoMp4({
+          songQuery: cleanedText,
+          lyricsData,
+          glowTheme,
+          isStory,
+          isFull,
+          isReff,
+          customReff,
+          isRap,
+          isIntro,
+          preferViral: !isIntro && !isFull && !isReff && !isRap && fromTime === null && !lyricSearch,
+          fromTime,
+          lyricSearch,
+          syncOffset,
+          isCustomOffset,
+        });
+
+        const caption = `[Spotify Glow Lyrics]\n` +
+          `Judul: ${result.trackName}\n` +
+          `Artis: ${result.artistName}\n` +
+          `Tema: ${result.theme.toUpperCase()}\n` +
+          `Bagian: ${result.partLabel}`;
+
+        if (platform === 'telegram' && ctx) {
+          await ctx.replyWithVideo(new InputFile(result.buffer, 'spotify_glow.mp4'), { caption });
+        } else {
+          await sock.sendMessage(jid, {
+            video: result.buffer,
+            mimetype: 'video/mp4',
+            caption,
+          });
+        }
+      } catch (err) {
+        logger.error('Error saat membuat Spotify Glow video:', err.message);
+        await reply(`[!] Gagal membuat video Spotify Glow MP4: ${err.message}`);
       }
     },
   });
