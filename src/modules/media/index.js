@@ -1362,19 +1362,19 @@ function renderBratSvg(
     const isNewest = idx === activeIndex;
     const op = isNewest ? activeOpacity : 1.0;
     const dy = isNewest ? activeDy : 0;
-    const yPos = parseFloat(pw.y);
-    const hasTransform = isNewest && (activeScale !== 1.0 || dy !== 0);
+    const baseY = parseFloat(pw.y);
 
-    if (hasTransform) {
+    if (isNewest && activeScale !== 1.0) {
       const wordW = pw.word.length * (layout.fontSize * 0.45);
       const ox = parseFloat(pw.x) + (pw.anchor === 'middle' ? 0 : wordW / 2);
-      const oy = yPos - (layout.fontSize * 0.35);
+      const oy = baseY - (layout.fontSize * 0.35);
       const transform = `translate(${ox.toFixed(2)}, ${(oy + dy).toFixed(2)}) scale(${activeScale}) translate(${-ox.toFixed(2)}, ${-oy.toFixed(2)})`;
       return `<g transform="${transform}">
-        <text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>
+        <text x="${pw.x}" y="${baseY.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>
       </g>`;
     }
 
+    const yPos = baseY + dy;
     return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
   });
 
@@ -2513,55 +2513,52 @@ export async function generateBratVideoMp4({
               : curTheme.bg;
 
             if (durationFrames >= 4) {
-              // Frame 0: Kinetic Punch-In (33ms) - Scale 1.15x, terangkat (-2.6px), opacity 0.95
+              // Frame 0: Muncul dari bawah dengan opacity lembut (33ms)
               const f0Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                0.95,
-                -2.6,
+                0.45,
+                2.4,
                 initialFrameBg,
                 curTheme.textColor,
-                0.9,
-                1.15
+                1.0
               );
               const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
               await sharp(Buffer.from(f0Svg)).png().toFile(p0);
               pushFrame(p0, 1);
 
-              // Frame 1: Elastic Recoil Cushion (33ms) - Scale 0.97x, memantul halus (+0.8px), opacity 1.0
+              // Frame 1: Meluncur naik mendekati posisi baseline (33ms)
               const f1Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                1.0,
+                0.85,
                 0.8,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                0.97
+                0.9
               );
               const p1 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p1.png`);
               await sharp(Buffer.from(f1Svg)).png().toFile(p1);
               pushFrame(p1, 1);
 
-              // Frame 2: Soft Micro-Settle (33ms) - Scale 1.01x, merapat (-0.2px), opacity 1.0
+              // Frame 2: Merapat halus tepat di baseline (33ms)
               const f2Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                1.0,
-                -0.2,
+                0.98,
+                0.2,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                1.01
+                0.9
               );
               const p2 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p2.png`);
               await sharp(Buffer.from(f2Svg)).png().toFile(p2);
               pushFrame(p2, 1);
 
-              // Sisa frame: Solid Resting State (100% terkunci pada baseline)
+              // Sisa frame: Solid Resting State terkunci pada baseline
               const solidSvg = renderBratSvg(
                 lineLayout,
                 visible,
@@ -2570,40 +2567,37 @@ export async function generateBratVideoMp4({
                 0.0,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                1.0
+                0.9
               );
               const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
               await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
               pushFrame(pSolid, durationFrames - 3);
             } else if (durationFrames === 3) {
-              // Frame 0: Punch-In (33ms) - Scale 1.12x, terangkat (-2.0px)
+              // Frame 0: Muncul dari bawah (33ms)
               const f0Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                0.95,
-                -2.0,
+                0.55,
+                2.0,
                 initialFrameBg,
                 curTheme.textColor,
-                0.9,
-                1.12
+                1.0
               );
               const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
               await sharp(Buffer.from(f0Svg)).png().toFile(p0);
               pushFrame(p0, 1);
 
-              // Frame 1: Elastic Recoil (33ms) - Scale 0.98x
+              // Frame 1: Meluncur naik ke baseline (33ms)
               const f1Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                1.0,
-                0.5,
+                0.90,
+                0.6,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                0.98
+                0.9
               );
               const p1 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p1.png`);
               await sharp(Buffer.from(f1Svg)).png().toFile(p1);
@@ -2618,24 +2612,22 @@ export async function generateBratVideoMp4({
                 0.0,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                1.0
+                0.9
               );
               const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
               await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
               pushFrame(pSolid, 1);
             } else if (durationFrames === 2) {
-              // Frame 0: Punch-In cepat (33ms) - Scale 1.08x
+              // Frame 0: Meluncur cepat dari bawah (33ms)
               const f0Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
-                1.0,
-                -1.2,
+                0.75,
+                1.2,
                 initialFrameBg,
                 curTheme.textColor,
-                0.9,
-                1.08
+                0.9
               );
               const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
               await sharp(Buffer.from(f0Svg)).png().toFile(p0);
@@ -2650,8 +2642,7 @@ export async function generateBratVideoMp4({
                 0.0,
                 curTheme.bg,
                 curTheme.textColor,
-                0.9,
-                1.0
+                0.9
               );
               const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
               await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
@@ -2664,10 +2655,9 @@ export async function generateBratVideoMp4({
                 activeIdx,
                 1.0,
                 0.0,
-                curTheme.bg,
+                initialFrameBg,
                 curTheme.textColor,
-                0.9,
-                1.0
+                0.9
               );
               const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
               await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
