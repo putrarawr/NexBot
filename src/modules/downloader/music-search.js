@@ -295,7 +295,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
     ? searchTerm
     : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} official audio`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b/best" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
-  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android_creator,android,ios,web" ';
+  const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=ios,mweb,android,web" ';
   const cmd = `yt-dlp ${getCookieArgs()}${getProxyArgs()}${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
@@ -323,11 +323,12 @@ export async function downloadMusicTrack(target, metadata = {}) {
 
     if (!youtubeOk) {
       logger.warn('YouTube fallback failed, trying SoundCloud fallback');
-      let scTarget = `scsearch1:${cleanFallback}`;
+      const cleanScFallback = cleanFallback.replace(/[&,]/g, ' ').replace(/\s+/g, ' ').trim();
+      let scTarget = `scsearch1:${cleanScFallback}`;
       if (metadata.targetDuration && Number(metadata.targetDuration) >= 60) {
         try {
           const safeDur = Number(metadata.targetDuration);
-          const scCandCmd = `yt-dlp ${getProxyArgs()}--flat-playlist --skip-download --no-warnings ${shellQuote(`scsearch5:${cleanFallback}`)} --print "%(url)s\t%(duration)s\t%(title)s"`;
+          const scCandCmd = `yt-dlp ${getProxyArgs()}--flat-playlist --skip-download --no-warnings ${shellQuote(`scsearch5:${cleanScFallback}`)} --print "%(url)s\t%(duration)s\t%(title)s"`;
           const { stdout: scOut } = await execAsync(scCandCmd, { timeout: 15000 });
           const scLines = scOut.split(/\r?\n/).filter(Boolean);
           let bestScUrl = null;
@@ -354,8 +355,15 @@ export async function downloadMusicTrack(target, metadata = {}) {
       try {
         await execAsync(scCmd, { timeout: 30000 });
       } catch (scErr) {
-        logger.warn('SoundCloud fallback failed:', scErr.message);
-        throw new Error('Gagal mengunduh audio lagu dari YouTube/SoundCloud (koneksi dibatasi penyedia atau audio dilindungi hak cipta).');
+        logger.warn('Primary SoundCloud fallback failed, trying simplified title:', scErr.message);
+        const simpleTitle = (metadata.title || cleanTerm).replace(/[&,]/g, ' ').replace(/\s+/g, ' ').trim();
+        const altScCmd = `yt-dlp ${getProxyArgs()}--no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(`scsearch1:${simpleTitle}`)}`;
+        try {
+          await execAsync(altScCmd, { timeout: 25000 });
+        } catch (altScErr) {
+          logger.warn('SoundCloud fallback failed completely:', altScErr.message);
+          throw new Error('Gagal mengunduh audio lagu dari YouTube/SoundCloud (koneksi dibatasi penyedia atau audio dilindungi hak cipta).');
+        }
       }
     }
   }

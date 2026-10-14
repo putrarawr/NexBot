@@ -1757,8 +1757,50 @@ export function normalizeFuzzy(str) {
     .trim();
 }
 
+export async function resolveUrlToSongQuery(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+
+  // 1. Spotify Track URL
+  const isSpotify = /spotify\.com\/track\/([a-zA-Z0-9]+)/i.exec(trimmed);
+  if (isSpotify) {
+    try {
+      const oembedRes = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(trimmed)}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+      if (oembedRes.ok) {
+        const data = await oembedRes.json();
+        if (data && data.title) {
+          return data.title;
+        }
+      }
+    } catch {}
+  }
+
+  // 2. YouTube URL
+  const isYt = /(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.exec(trimmed);
+  if (isYt) {
+    try {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(trimmed)}&format=json`, {
+        signal: AbortSignal.timeout(4000),
+      });
+      if (oembedRes.ok) {
+        const data = await oembedRes.json();
+        if (data && data.title) {
+          const cleanYtTitle = data.title
+            .replace(/[\(\[](?:official\s+)?(?:music\s+)?(?:video|audio|mv|hd|lyric\s+video|visualizer)[\]\)]/gi, '')
+            .trim();
+          return cleanYtTitle || data.title;
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
 export function parseSongSearchQuery(query) {
-  const clean = sanitizeLrcMeta(query);
+  let clean = sanitizeLrcMeta(query);
   if (!clean) {
     return {
       cleanSearchTerm: '',
@@ -1767,6 +1809,13 @@ export function parseSongSearchQuery(query) {
       searchTerms: [],
     };
   }
+
+  // Hapus prefix seperti "lagu ", "lirik ", "song ", dll. jika masih ada sisa judul di belakangnya
+  const prefixMatch = /^(?:lagu|lirik|lrc|musik|song|lyrics|track)\s+(.+)$/i.exec(clean);
+  if (prefixMatch && prefixMatch[1].trim().length >= 2) {
+    clean = prefixMatch[1].trim();
+  }
+  clean = clean.replace(/^[“"']+|[”"']+$/g, '').trim();
 
   const candidates = [];
   const searchTerms = new Set();
@@ -1835,6 +1884,25 @@ export function parseSongSearchQuery(query) {
     searchTerms.add(withoutBy);
   }
 
+  // Permutasi kata untuk query 2-4 kata tanpa pemisah eksplisit (contoh: "Coldplay Fix You" atau "Djo End of Beginning")
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (candidates.length === 0 && words.length >= 2 && words.length <= 4 && !clean.includes('-') && !/\bby\b/i.test(clean)) {
+    candidates.push({ track: words.slice(1).join(' '), artist: words[0] });
+    candidates.push({ track: words.slice(0, -1).join(' '), artist: words[words.length - 1] });
+    if (words.length === 3) {
+      candidates.push({ track: words.slice(2).join(' '), artist: words.slice(0, 2).join(' ') });
+      candidates.push({ track: words.slice(0, 2).join(' '), artist: words.slice(2).join(' ') });
+    }
+  }
+
+  for (const c of candidates) {
+    if (c.track && c.artist) {
+      searchTerms.add(`${c.track} ${c.artist}`);
+      searchTerms.add(`${c.artist} ${c.track}`);
+      searchTerms.add(c.track);
+    }
+  }
+
   return {
     cleanSearchTerm: clean,
     featArtist,
@@ -1844,7 +1912,17 @@ export function parseSongSearchQuery(query) {
 }
 
 export async function fetchSongLyricsWithSync(query) {
-  const parsedQuery = parseSongSearchQuery(query);
+  let rawQuery = query;
+  if (typeof query === 'string' && /^https?:\/\//i.test(query.trim())) {
+    try {
+      const resolvedFromUrl = await resolveUrlToSongQuery(query.trim());
+      if (resolvedFromUrl) {
+        rawQuery = resolvedFromUrl;
+      }
+    } catch {}
+  }
+
+  const parsedQuery = parseSongSearchQuery(rawQuery);
   const { cleanSearchTerm, featArtist, candidates, searchTerms } = parsedQuery;
   if (!cleanSearchTerm) return null;
 
@@ -1863,7 +1941,7 @@ export async function fetchSongLyricsWithSync(query) {
   let canonicalDuration = 0;
   let itunesFallbackItem = null;
 
-  // 1. Coba cari metadata lagu di iTunes (ID store + Global store)
+  // 1. Coba cari metadata lagu di iTunes (ID store + Global store) + Deezer Music
   try {
     const primaryTerm = searchTerms[0] || cleanSearchTerm;
     const secondaryTerm = searchTerms.find((t) => t !== primaryTerm);
@@ -1873,19 +1951,45 @@ export async function fetchSongLyricsWithSync(query) {
     const itunesFetches = [
       fetch(itunesU1, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
       fetch(itunesU2, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
+      fetch(`https://api.deezer.com/search?q=${encodeURIComponent(primaryTerm)}&limit=6`, { signal: AbortSignal.timeout(3500) })
+        .then((r) => r.json())
+        .then((d) => (d && Array.isArray(d.data) ? d.data : []))
+        .catch(() => []),
     ];
     if (secondaryTerm) {
       itunesFetches.push(
         fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(secondaryTerm)}&country=id&entity=song&limit=8`, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] }))
+      );
+      itunesFetches.push(
+        fetch(`https://api.deezer.com/search?q=${encodeURIComponent(secondaryTerm)}&limit=6`, { signal: AbortSignal.timeout(3500) })
+          .then((r) => r.json())
+          .then((d) => (d && Array.isArray(d.data) ? d.data : []))
+          .catch(() => [])
       );
     }
 
     const itunesResponses = await Promise.all(itunesFetches);
     const itunesMap = new Map();
     for (const res of itunesResponses) {
-      for (const item of (res.results || [])) {
-        if (item.trackId && !itunesMap.has(item.trackId)) {
-          itunesMap.set(item.trackId, item);
+      if (Array.isArray(res)) {
+        // Entri dari Deezer API
+        for (const d of res) {
+          const idKey = `dz_${d.id}`;
+          if (!itunesMap.has(idKey)) {
+            itunesMap.set(idKey, {
+              trackId: idKey,
+              trackName: d.title,
+              artistName: d.artist?.name || '',
+              trackTimeMillis: (d.duration || 0) * 1000,
+              artworkUrl100: d.album?.cover_big || d.album?.cover_medium || '',
+            });
+          }
+        }
+      } else {
+        for (const item of (res.results || [])) {
+          if (item.trackId && !itunesMap.has(item.trackId)) {
+            itunesMap.set(item.trackId, item);
+          }
         }
       }
     }
