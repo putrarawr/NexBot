@@ -1362,9 +1362,20 @@ function renderBratSvg(
     const isNewest = idx === activeIndex;
     const op = isNewest ? activeOpacity : 1.0;
     const dy = isNewest ? activeDy : 0;
-    const yPos = parseFloat(pw.y) + dy;
-    const fSize = isNewest && activeScale !== 1.0 ? `${(layout.fontSize * activeScale).toFixed(1)}px` : `${layout.fontSize}px`;
-    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fSize}" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
+    const yPos = parseFloat(pw.y);
+    const hasTransform = isNewest && (activeScale !== 1.0 || dy !== 0);
+
+    if (hasTransform) {
+      const wordW = pw.word.length * (layout.fontSize * 0.45);
+      const ox = parseFloat(pw.x) + (pw.anchor === 'middle' ? 0 : wordW / 2);
+      const oy = yPos - (layout.fontSize * 0.35);
+      const transform = `translate(${ox.toFixed(2)}, ${(oy + dy).toFixed(2)}) scale(${activeScale}) translate(${-ox.toFixed(2)}, ${-oy.toFixed(2)})`;
+      return `<g transform="${transform}">
+        <text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>
+      </g>`;
+    }
+
+    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
   });
 
   return `
@@ -2501,40 +2512,136 @@ export async function generateBratVideoMp4({
               ? interpolateHexColor(prevLayerBg, curTheme.bg, bgBlendFactor)
               : curTheme.bg;
 
-            if (durationFrames >= 3) {
-              // Frame 0: Punch-In (33ms) - Scale 1.08x, sedikit terangkat (-1.6px), opacity 0.95
-              const popSvg = renderBratSvg(
+            if (durationFrames >= 4) {
+              // Frame 0: Kinetic Punch-In (33ms) - Scale 1.15x, terangkat (-2.6px), opacity 0.95
+              const f0Svg = renderBratSvg(
                 lineLayout,
                 visible,
                 activeIdx,
                 0.95,
-                -1.6,
+                -2.6,
+                initialFrameBg,
+                curTheme.textColor,
+                0.9,
+                1.15
+              );
+              const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
+              await sharp(Buffer.from(f0Svg)).png().toFile(p0);
+              pushFrame(p0, 1);
+
+              // Frame 1: Elastic Recoil Cushion (33ms) - Scale 0.97x, memantul halus (+0.8px), opacity 1.0
+              const f1Svg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.8,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                0.97
+              );
+              const p1 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p1.png`);
+              await sharp(Buffer.from(f1Svg)).png().toFile(p1);
+              pushFrame(p1, 1);
+
+              // Frame 2: Soft Micro-Settle (33ms) - Scale 1.01x, merapat (-0.2px), opacity 1.0
+              const f2Svg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                -0.2,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.01
+              );
+              const p2 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p2.png`);
+              await sharp(Buffer.from(f2Svg)).png().toFile(p2);
+              pushFrame(p2, 1);
+
+              // Sisa frame: Solid Resting State (100% terkunci pada baseline)
+              const solidSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.0
+              );
+              const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
+              pushFrame(pSolid, durationFrames - 3);
+            } else if (durationFrames === 3) {
+              // Frame 0: Punch-In (33ms) - Scale 1.12x, terangkat (-2.0px)
+              const f0Svg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                0.95,
+                -2.0,
+                initialFrameBg,
+                curTheme.textColor,
+                0.9,
+                1.12
+              );
+              const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
+              await sharp(Buffer.from(f0Svg)).png().toFile(p0);
+              pushFrame(p0, 1);
+
+              // Frame 1: Elastic Recoil (33ms) - Scale 0.98x
+              const f1Svg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.5,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                0.98
+              );
+              const p1 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p1.png`);
+              await sharp(Buffer.from(f1Svg)).png().toFile(p1);
+              pushFrame(p1, 1);
+
+              // Frame 2: Solid Resting State
+              const solidSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.0
+              );
+              const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
+              pushFrame(pSolid, 1);
+            } else if (durationFrames === 2) {
+              // Frame 0: Punch-In cepat (33ms) - Scale 1.08x
+              const f0Svg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                -1.2,
                 initialFrameBg,
                 curTheme.textColor,
                 0.9,
                 1.08
               );
-              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p0.png`);
-              await sharp(Buffer.from(popSvg)).png().toFile(popPath);
-              pushFrame(popPath, 1);
+              const p0 = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_p0.png`);
+              await sharp(Buffer.from(f0Svg)).png().toFile(p0);
+              pushFrame(p0, 1);
 
-              // Frame 1: Soft Ease-Out Settle (33ms) - Scale 1.03x, merapat ke baseline (-0.6px), opacity 1.0
-              const settleSvg = renderBratSvg(
-                lineLayout,
-                visible,
-                activeIdx,
-                1.0,
-                -0.6,
-                curTheme.bg,
-                curTheme.textColor,
-                0.9,
-                1.03
-              );
-              const settlePath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p1.png`);
-              await sharp(Buffer.from(settleSvg)).png().toFile(settlePath);
-              pushFrame(settlePath, 1);
-
-              // Sisa frame: Resting State (stabil, 100% solid, tajam)
+              // Frame 1: Solid Resting State
               const solidSvg = renderBratSvg(
                 lineLayout,
                 visible,
@@ -2546,43 +2653,11 @@ export async function generateBratVideoMp4({
                 0.9,
                 1.0
               );
-              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
-              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-              pushFrame(solidPath, durationFrames - 2);
-            } else if (durationFrames === 2) {
-              // Frame 0: Punch-In cepat (33ms)
-              const popSvg = renderBratSvg(
-                lineLayout,
-                visible,
-                activeIdx,
-                1.0,
-                -1.0,
-                initialFrameBg,
-                curTheme.textColor,
-                0.9,
-                1.05
-              );
-              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_p0.png`);
-              await sharp(Buffer.from(popSvg)).png().toFile(popPath);
-              pushFrame(popPath, 1);
-
-              // Frame 1: Resting State (33ms)
-              const solidSvg = renderBratSvg(
-                lineLayout,
-                visible,
-                activeIdx,
-                1.0,
-                0.0,
-                curTheme.bg,
-                curTheme.textColor,
-                0.9,
-                1.0
-              );
-              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
-              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-              pushFrame(solidPath, 1);
+              const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
+              pushFrame(pSolid, 1);
             } else {
-              // 1 frame (kata super cepat): langsung resting state stabil
+              // 1 frame (kata super cepat): Solid Resting State langsung
               const solidSvg = renderBratSvg(
                 lineLayout,
                 visible,
@@ -2594,9 +2669,9 @@ export async function generateBratVideoMp4({
                 0.9,
                 1.0
               );
-              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
-              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-              pushFrame(solidPath, 1);
+              const pSolid = path.join(tmpDir, `base_w${i}_s${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(pSolid);
+              pushFrame(pSolid, 1);
             }
 
             stepIdx = nextStepIdx;
