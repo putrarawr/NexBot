@@ -33,7 +33,7 @@ import {
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords, parseReffParam, findReffClusters, parseSongSearchQuery } from '../src/modules/media/index.js';
-import { renderSpotifyGlowSvg, SPOTIFY_GLOW_THEMES } from '../src/modules/media/spotify-glow.js';
+import { renderSpotifyGlowSvg, SPOTIFY_GLOW_THEMES, prepareSegments, getSegmentWords, wrapLyricsWords } from '../src/modules/media/spotify-glow.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -490,6 +490,14 @@ async function runAllTests() {
     assert.equal(bratMp4Res.buffer.subarray(4, 8).toString(), 'ftyp', 'Must be valid MP4 container');
     assert.ok(bratMp4Res.duration > 0, 'Duration must be positive');
 
+    const prepResult = prepareSegments(sampleSegments, false);
+    assert.ok(Array.isArray(prepResult.preparedSegments));
+    assert.equal(prepResult.preparedSegments.length, sampleSegments.length);
+    assert.equal(prepResult.cumulativeY.length, sampleSegments.length);
+    assert.equal(prepResult.idealScrollY.length, sampleSegments.length);
+
+    const testMockArt = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkWPjfDwAEeQHzE1F2vAAAAABJRU5ErkJggg==';
+
     const spotifyGlowSvg = renderSpotifyGlowSvg({
       trackName: 'Fix You',
       artistName: 'Coldplay',
@@ -499,11 +507,15 @@ async function runAllTests() {
       windowStartTime: 0,
       windowDuration: 30,
       themeKey: 'green',
+      albumArtBase64: testMockArt,
+      ambientColor: { r: 30, g: 215, b: 96 },
     });
     assert.ok(spotifyGlowSvg.includes('Fix You'));
     assert.ok(spotifyGlowSvg.includes('Coldplay'));
     assert.ok(spotifyGlowSvg.includes('SPOTIFY GLOW'));
     assert.ok(spotifyGlowSvg.includes(SPOTIFY_GLOW_THEMES.green.glowColor));
+    assert.ok(spotifyGlowSvg.includes(testMockArt));
+    assert.ok(spotifyGlowSvg.includes('rgb(30, 215, 96)'));
   });
 
   // 4d. Group Utility & AFK Tests

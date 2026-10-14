@@ -22,11 +22,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'green',
     name: 'Spotify Green',
     glowColor: '#1ed760',
-    topGrad: '#131e17',
-    midGrad: '#0e1410',
-    botGrad: '#080a09',
-    cardBg: '#18201a',
-    cardBorder: '#26332a',
+    topGrad: '#0c1610',
+    midGrad: '#080e0a',
+    botGrad: '#040705',
+    cardBg: 'rgba(18, 26, 21, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#6f7b73',
     subText: '#9da8a0',
   },
@@ -34,11 +34,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'cyan',
     name: 'Electric Cyan',
     glowColor: '#00f2fe',
-    topGrad: '#0c1a24',
-    midGrad: '#08121a',
-    botGrad: '#050a0e',
-    cardBg: '#101d26',
-    cardBorder: '#1c3140',
+    topGrad: '#09151d',
+    midGrad: '#060e14',
+    botGrad: '#03070a',
+    cardBg: 'rgba(16, 26, 33, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#5e7585',
     subText: '#91b0c4',
   },
@@ -46,11 +46,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'purple',
     name: 'Cyber Violet',
     glowColor: '#c084fc',
-    topGrad: '#1d1229',
-    midGrad: '#130b1c',
-    botGrad: '#0b0610',
-    cardBg: '#1e142b',
-    cardBorder: '#35214d',
+    topGrad: '#150d1e',
+    midGrad: '#0e0814',
+    botGrad: '#07040a',
+    cardBg: 'rgba(26, 17, 36, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#7b6891',
     subText: '#bfa7de',
   },
@@ -58,11 +58,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'pink',
     name: 'Neon Magenta',
     glowColor: '#f43f5e',
-    topGrad: '#24101a',
-    midGrad: '#170910',
-    botGrad: '#0d0408',
-    cardBg: '#26131c',
-    cardBorder: '#451c2f',
+    topGrad: '#1c0c14',
+    midGrad: '#13080e',
+    botGrad: '#0a0407',
+    cardBg: 'rgba(32, 16, 24, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#875d71',
     subText: '#d49ab3',
   },
@@ -70,11 +70,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'gold',
     name: 'Sunset Gold',
     glowColor: '#fbbf24',
-    topGrad: '#241c0e',
-    midGrad: '#171107',
-    botGrad: '#0d0903',
-    cardBg: '#261d10',
-    cardBorder: '#47361a',
+    topGrad: '#1a140a',
+    midGrad: '#110d06',
+    botGrad: '#090703',
+    cardBg: 'rgba(30, 23, 13, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#877559',
     subText: '#d6be98',
   },
@@ -82,11 +82,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'blue',
     name: 'Deep Blue',
     glowColor: '#38bdf8',
-    topGrad: '#0c1626',
-    midGrad: '#070e1a',
-    botGrad: '#04070e',
-    cardBg: '#101c2e',
-    cardBorder: '#1d3252',
+    topGrad: '#09121d',
+    midGrad: '#060c14',
+    botGrad: '#03060a',
+    cardBg: 'rgba(16, 24, 34, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#5d7391',
     subText: '#93b1d9',
   },
@@ -94,11 +94,11 @@ export const SPOTIFY_GLOW_THEMES = {
     id: 'white',
     name: 'Diamond White',
     glowColor: '#ffffff',
-    topGrad: '#18191c',
-    midGrad: '#101114',
-    botGrad: '#0a0a0c',
-    cardBg: '#1b1c21',
-    cardBorder: '#2e3038',
+    topGrad: '#141416',
+    midGrad: '#0d0d0f',
+    botGrad: '#070708',
+    cardBg: 'rgba(25, 25, 28, 0.88)',
+    cardBorder: 'rgba(255, 255, 255, 0.08)',
     mutedText: '#727580',
     subText: '#b0b3bf',
   },
@@ -120,6 +120,58 @@ function formatDuration(sec) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+export function getSegmentWords(seg, nextSegTime) {
+  if (Array.isArray(seg.words) && seg.words.length > 0) {
+    return seg.words;
+  }
+  const rawWords = (seg.text || '').trim().split(/\s+/).filter(Boolean);
+  if (rawWords.length === 0) return [];
+  const lineStart = seg.time;
+  const lineEnd = nextSegTime ? Math.min(seg.time + 6.0, nextSegTime) : seg.time + (seg.duration || 3.5);
+  const totalDuration = Math.max(0.8, lineEnd - lineStart);
+
+  const totalChars = rawWords.reduce((acc, w) => acc + Math.max(2, w.length), 0);
+  let curTime = lineStart;
+  return rawWords.map((word) => {
+    const weight = Math.max(2, word.length) / totalChars;
+    const dur = totalDuration * weight;
+    const wObj = {
+      text: word,
+      time: curTime,
+      duration: dur,
+      endTime: curTime + dur,
+    };
+    curTime += dur;
+    return wObj;
+  });
+}
+
+export function wrapLyricsWords(words, maxChars = 26) {
+  if (!words || words.length === 0) return [];
+  const lines = [];
+  let currentLine = [];
+  let currentLen = 0;
+
+  for (const w of words) {
+    const wordLen = (w.text || '').length;
+    if (currentLine.length === 0) {
+      currentLine.push(w);
+      currentLen = wordLen;
+    } else if (currentLen + 1 + wordLen <= maxChars) {
+      currentLine.push(w);
+      currentLen += 1 + wordLen;
+    } else {
+      lines.push(currentLine);
+      currentLine = [w];
+      currentLen = wordLen;
+    }
+  }
+  if (currentLine.length > 0) {
+    lines.push(currentLine);
+  }
+  return lines;
+}
+
 export function wrapLyricsText(text, maxChars = 28) {
   if (!text) return [];
   const words = text.trim().split(/\s+/);
@@ -139,18 +191,104 @@ export function wrapLyricsText(text, maxChars = 28) {
   return lines;
 }
 
+export function prepareSegments(segments, isStory = false) {
+  const wrapLimit = isStory ? 22 : 26;
+  const segmentGap = isStory ? 24 : 28;
+
+  const prepared = segments.map((seg, idx) => {
+    const nextSeg = segments[idx + 1];
+    const words = getSegmentWords(seg, nextSeg ? nextSeg.time : null);
+    const wrappedLines = wrapLyricsWords(words, wrapLimit);
+    const segH = Math.max(1, wrappedLines.length) * 36 + segmentGap;
+    return {
+      ...seg,
+      words,
+      wrappedLines,
+      segH,
+    };
+  });
+
+  let cum = 0;
+  const cumulativeY = [];
+  for (let i = 0; i < prepared.length; i++) {
+    cumulativeY.push(cum);
+    cum += prepared[i].segH;
+  }
+
+  const height = isStory ? 960 : 720;
+  const viewportCenterY = Math.round(height * 0.46);
+  const idealScrollY = prepared.map((seg, i) => {
+    const centerOfSeg = cumulativeY[i] + (seg.segH - segmentGap) / 2;
+    return viewportCenterY - centerOfSeg;
+  });
+
+  return {
+    preparedSegments: prepared,
+    cumulativeY,
+    idealScrollY,
+  };
+}
+
+function renderActiveTspans(wrappedLines, currentTime, activeLineHeight, theme, isGlowLayer) {
+  let out = '';
+  for (let lIdx = 0; lIdx < wrappedLines.length; lIdx++) {
+    const line = wrappedLines[lIdx];
+    for (let wIdx = 0; wIdx < line.length; wIdx++) {
+      const w = line[wIdx];
+      const isLineStart = wIdx === 0;
+      const posAttr = isLineStart ? (lIdx === 0 ? 'x="54"' : `x="54" dy="${activeLineHeight}"`) : '';
+
+      const isPast = currentTime >= (w.time + w.duration);
+      const isActive = currentTime >= w.time && currentTime < (w.time + w.duration);
+
+      let fill;
+      let opacity = '1';
+      if (isGlowLayer) {
+        if (isActive) {
+          fill = theme.glowColor;
+          opacity = '1.0';
+        } else {
+          fill = 'transparent';
+          opacity = '0';
+        }
+      } else {
+        if (isActive) {
+          fill = '#ffffff';
+          opacity = '1.0';
+        } else if (isPast) {
+          fill = '#ffffff';
+          opacity = '0.94';
+        } else {
+          fill = '#ffffff';
+          opacity = '0.32';
+        }
+      }
+
+      out += `<tspan ${posAttr} fill="${fill}" opacity="${opacity}">${escapeXml(w.text)} </tspan>`;
+    }
+  }
+  return out;
+}
+
 export function renderSpotifyGlowSvg({
   trackName = 'Unknown Track',
   artistName = 'Unknown Artist',
   segments = [],
+  preparedSegments: inputPrepared = null,
+  cumulativeY: inputCumulative = null,
+  idealScrollY: inputIdeal = null,
   activeIndex = 0,
+  currentSegIdx = null,
   currentTime = 0,
   windowStartTime = 0,
   windowDuration = 30,
   themeKey = 'green',
   width = 720,
   height = 720,
+  currentScrollY = null,
   scrollDy = 0,
+  albumArtBase64 = null,
+  ambientColor = null,
 }) {
   const theme = SPOTIFY_GLOW_THEMES[themeKey] || SPOTIFY_GLOW_THEMES.green;
   const isStory = height > width;
@@ -161,144 +299,170 @@ export function renderSpotifyGlowSvg({
   const headerW = width - (headerX * 2);
   const headerH = 78;
 
-  // Active Progress
+  // Progress
   const elapsed = Math.max(0, currentTime - windowStartTime);
   const progressRatio = Math.min(1.0, Math.max(0, elapsed / Math.max(1, windowDuration)));
   const progressW = Math.max(8, (width - 108) * progressRatio);
 
-  // Sound Bars Animation (cyclical pulse)
+  // Dynamic Audio Visualizer Equalizer Bars
   const barHeights = [
-    Math.round(14 + Math.sin(currentTime * 8) * 8),
-    Math.round(24 + Math.sin(currentTime * 8 + 1.6) * 10),
-    Math.round(18 + Math.sin(currentTime * 8 + 3.2) * 8),
-    Math.round(26 + Math.sin(currentTime * 8 + 4.8) * 9),
+    Math.max(6, Math.min(32, Math.round(12 + Math.abs(Math.sin(currentTime * 6.2)) * 14 + Math.sin(currentTime * 14) * 4))),
+    Math.max(8, Math.min(34, Math.round(18 + Math.abs(Math.sin(currentTime * 8.5 + 1.2)) * 16 + Math.cos(currentTime * 17) * 4))),
+    Math.max(6, Math.min(32, Math.round(14 + Math.abs(Math.sin(currentTime * 7.1 + 2.5)) * 18 + Math.sin(currentTime * 12) * 5))),
+    Math.max(8, Math.min(34, Math.round(16 + Math.abs(Math.sin(currentTime * 9.3 + 3.8)) * 12 + Math.cos(currentTime * 15) * 3))),
   ];
-
-  // Active segment
-  const activeSeg = segments[activeIndex] || { text: '' };
-  const prev1Seg = activeIndex > 0 ? segments[activeIndex - 1] : null;
-  const prev2Seg = activeIndex > 1 ? segments[activeIndex - 2] : null;
-  const next1Seg = activeIndex + 1 < segments.length ? segments[activeIndex + 1] : null;
-  const next2Seg = activeIndex + 2 < segments.length ? segments[activeIndex + 2] : null;
-
-  // Typography & Layout Coordinates
-  const wrapLimit = isStory ? 22 : 28;
-  const activeLines = wrapLyricsText(activeSeg.text, wrapLimit);
-  const activeLineHeight = isStory ? 38 : 42;
-  const activeBlockHeight = Math.max(1, activeLines.length) * activeLineHeight;
-
-  // Center Y reference
-  const centerY = (height / 2) + scrollDy;
-  const activeStartY = centerY - (activeBlockHeight / 2) + 20;
-
-  // Build Active Line Tspans
-  const activeFontSize = isStory ? 28 : 32;
-  const activeTspans = activeLines.map((line, idx) => {
-    const dy = idx === 0 ? 0 : activeLineHeight;
-    return `<tspan x="54" dy="${dy}">${escapeXml(line)}</tspan>`;
-  }).join('');
-
-  // Previous Lines
-  const prev1Lines = prev1Seg ? wrapLyricsText(prev1Seg.text, wrapLimit + 4) : [];
-  const prev1BlockH = prev1Lines.length * 30;
-  const prev1Y = activeStartY - prev1BlockH - 24;
-  const prev1Tspans = prev1Lines.map((l, idx) => `<tspan x="54" dy="${idx === 0 ? 0 : 30}">${escapeXml(l)}</tspan>`).join('');
-
-  const prev2Lines = prev2Seg ? wrapLyricsText(prev2Seg.text, wrapLimit + 6) : [];
-  const prev2BlockH = prev2Lines.length * 26;
-  const prev2Y = prev1Y - prev2BlockH - 18;
-  const prev2Tspans = prev2Lines.map((l, idx) => `<tspan x="54" dy="${idx === 0 ? 0 : 26}">${escapeXml(l)}</tspan>`).join('');
-
-  // Next Lines
-  const next1StartY = activeStartY + activeBlockHeight + 28;
-  const next1Lines = next1Seg ? wrapLyricsText(next1Seg.text, wrapLimit + 4) : [];
-  const next1Tspans = next1Lines.map((l, idx) => `<tspan x="54" dy="${idx === 0 ? 0 : 30}">${escapeXml(l)}</tspan>`).join('');
-
-  const next2StartY = next1StartY + (next1Lines.length * 30) + 22;
-  const next2Lines = next2Seg ? wrapLyricsText(next2Seg.text, wrapLimit + 6) : [];
-  const next2Tspans = next2Lines.map((l, idx) => `<tspan x="54" dy="${idx === 0 ? 0 : 26}">${escapeXml(l)}</tspan>`).join('');
 
   const footerY = height - (isStory ? 80 : 64);
   const badgeY = height - (isStory ? 44 : 36);
 
+  // Prepare segments if not passed precalculated
+  let prepList = inputPrepared;
+  let cumList = inputCumulative;
+  let idealList = inputIdeal;
+  if (!prepList || !cumList || !idealList) {
+    const sourceSegs = segments && segments.length > 0 ? segments : [{ text: '...' }];
+    const prepResult = prepareSegments(sourceSegs, isStory);
+    prepList = prepResult.preparedSegments;
+    cumList = prepResult.cumulativeY;
+    idealList = prepResult.idealScrollY;
+  }
+
+  const activeIdx = Math.max(0, Math.min(prepList.length - 1, currentSegIdx !== null ? currentSegIdx : activeIndex));
+  const activeLineHeight = isStory ? 38 : 42;
+  const activeFontSize = isStory ? 28 : 32;
+
+  // Camera scroll position
+  const activeScroll = currentScrollY !== null ? currentScrollY : (idealList[activeIdx] + scrollDy);
+
+  // Ambient aura color
+  let ambientFill = theme.glowColor;
+  if (ambientColor && typeof ambientColor.r === 'number') {
+    ambientFill = `rgb(${ambientColor.r}, ${ambientColor.g}, ${ambientColor.b})`;
+  }
+
+  // Build rendered lyrics elements
+  const lyricsElements = prepList.map((seg, idx) => {
+    const segY = cumList[idx] + activeScroll;
+    const dist = idx - activeIdx;
+
+    // Skip off-screen segments
+    if (segY < -100 || segY > height + 80) {
+      return '';
+    }
+
+    if (dist === 0) {
+      return `
+        <!-- Active Segment -->
+        <text x="54" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900" filter="url(#spotGlow)">
+          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, theme, true)}
+        </text>
+        <text x="54" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900">
+          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, theme, false)}
+        </text>
+      `;
+    }
+
+    const absDist = Math.abs(dist);
+    const opacity = absDist === 1 ? '0.45' : absDist === 2 ? '0.22' : '0.10';
+    const linesText = seg.wrappedLines.map((lineWords, lIdx) => {
+      const lineStr = lineWords.map((w) => w.text).join(' ');
+      const dy = lIdx === 0 ? 0 : 30;
+      return `<tspan x="54" dy="${dy}">${escapeXml(lineStr)}</tspan>`;
+    }).join('');
+
+    return `
+      <text x="54" y="${segY + 26}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="22px" font-weight="700" fill="#ffffff" opacity="${opacity}">
+        ${linesText}
+      </text>
+    `;
+  }).filter(Boolean).join('\n');
+
   return `
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
+      <!-- Background Gradients -->
       <linearGradient id="spotBg" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="${theme.topGrad}" />
-        <stop offset="45%" stop-color="${theme.midGrad}" />
+        <stop offset="50%" stop-color="${theme.midGrad}" />
         <stop offset="100%" stop-color="${theme.botGrad}" />
       </linearGradient>
-      <radialGradient id="spotAura" cx="35%" cy="50%" r="65%">
-        <stop offset="0%" stop-color="${theme.glowColor}" stop-opacity="0.16" />
-        <stop offset="100%" stop-color="${theme.glowColor}" stop-opacity="0" />
+      <radialGradient id="spotAmbient" cx="30%" cy="40%" r="70%">
+        <stop offset="0%" stop-color="${ambientFill}" stop-opacity="0.14" />
+        <stop offset="100%" stop-color="${ambientFill}" stop-opacity="0" />
       </radialGradient>
+
+      <!-- Glow Filter for Active Lyrics -->
       <filter id="spotGlow" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur1" />
-        <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur2" />
+        <feGaussianBlur stdDeviation="6" result="blur1" />
+        <feGaussianBlur stdDeviation="14" result="blur2" />
         <feMerge>
           <feMergeNode in="blur2" />
           <feMergeNode in="blur1" />
           <feMergeNode in="SourceGraphic" />
         </feMerge>
       </filter>
+
+      <!-- Lyrics Fade Mask for Cinematic Top and Bottom Dissolve -->
+      <linearGradient id="fadeGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0" />
+        <stop offset="16%" stop-color="#ffffff" stop-opacity="1" />
+        <stop offset="84%" stop-color="#ffffff" stop-opacity="1" />
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+      </linearGradient>
+      <mask id="lyricsMask">
+        <rect x="0" y="${headerY + headerH + 10}" width="${width}" height="${footerY - headerY - headerH - 24}" fill="url(#fadeGrad)" />
+      </mask>
+
+      <!-- Clip Path for Album Artwork -->
+      <clipPath id="artClip">
+        <rect x="${headerX + 12}" y="${headerY + 11}" width="56" height="56" rx="10" />
+      </clipPath>
     </defs>
 
     <!-- Canvas Background -->
     <rect width="100%" height="100%" fill="url(#spotBg)" />
-    <rect width="100%" height="100%" fill="url(#spotAura)" />
+    <rect width="100%" height="100%" fill="url(#spotAmbient)" />
 
-    <!-- Top Card Header -->
-    <rect x="${headerX}" y="${headerY}" width="${headerW}" height="${headerH}" rx="16" fill="${theme.cardBg}" opacity="0.92" stroke="${theme.cardBorder}" stroke-width="1.5" />
-    <rect x="${headerX + 12}" y="${headerY + 11}" width="56" height="56" rx="10" fill="${theme.glowColor}" />
-    <path d="M ${headerX + 38} ${headerY + 24} L ${headerX + 50} ${headerY + 20} L ${headerX + 50} ${headerY + 38} A 5 5 0 1 1 ${headerX + 45} ${headerY + 33} L ${headerX + 45} ${headerY + 25} L ${headerX + 38} ${headerY + 28} Z" fill="#080a09" />
-    <text x="${headerX + 80}" y="${headerY + 35}" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="19px" fill="#ffffff">${escapeXml(trackName.slice(0, 32))}</text>
-    <text x="${headerX + 80}" y="${headerY + 57}" font-family="Arial, Helvetica, sans-serif" font-size="14px" fill="${theme.subText}">${escapeXml(artistName.slice(0, 38))}</text>
+    <!-- Masked Fluid Lyrics Stream -->
+    <g mask="url(#lyricsMask)">
+      ${lyricsElements}
+    </g>
 
-    <!-- Animated Audio Waveform Bars -->
-    <rect x="${width - headerX - 44}" y="${headerY + 38 - (barHeights[0] / 2)}" width="4" height="${barHeights[0]}" rx="2" fill="${theme.glowColor}" />
-    <rect x="${width - headerX - 35}" y="${headerY + 38 - (barHeights[1] / 2)}" width="4" height="${barHeights[1]}" rx="2" fill="${theme.glowColor}" />
-    <rect x="${width - headerX - 26}" y="${headerY + 38 - (barHeights[2] / 2)}" width="4" height="${barHeights[2]}" rx="2" fill="${theme.glowColor}" />
-    <rect x="${width - headerX - 17}" y="${headerY + 38 - (barHeights[3] / 2)}" width="4" height="${barHeights[3]}" rx="2" fill="${theme.glowColor}" />
+    <!-- Top Glass Header Card -->
+    <rect x="${headerX}" y="${headerY}" width="${headerW}" height="${headerH}" rx="18" fill="${theme.cardBg}" stroke="${theme.cardBorder}" stroke-width="1" />
 
-    <!-- Dimmed Prior Lines -->
-    ${prev2Seg && prev2Y > 110 ? `
-    <text x="54" y="${prev2Y}" font-family="Arial, Helvetica, sans-serif" font-size="20px" font-weight="bold" fill="${theme.mutedText}" opacity="0.25">
-      ${prev2Tspans}
-    </text>` : ''}
+    <!-- Album Artwork Integration or Vinyl Fallback -->
+    <g clip-path="url(#artClip)">
+      <rect x="${headerX + 12}" y="${headerY + 11}" width="56" height="56" fill="#141615" />
+      ${albumArtBase64 ? `
+      <image x="${headerX + 12}" y="${headerY + 11}" width="56" height="56" preserveAspectRatio="xMidYMid slice" href="${albumArtBase64}" />
+      ` : `
+      <circle cx="${headerX + 40}" cy="${headerY + 39}" r="24" fill="#1d211e" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" />
+      <circle cx="${headerX + 40}" cy="${headerY + 39}" r="16" fill="#141615" stroke="rgba(255,255,255,0.06)" stroke-width="1" />
+      <circle cx="${headerX + 40}" cy="${headerY + 39}" r="9" fill="${theme.glowColor}" />
+      <circle cx="${headerX + 40}" cy="${headerY + 39}" r="3" fill="#090a09" />
+      `}
+    </g>
+    <rect x="${headerX + 12}" y="${headerY + 11}" width="56" height="56" rx="10" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1" />
 
-    ${prev1Seg && prev1Y > 120 ? `
-    <text x="54" y="${prev1Y}" font-family="Arial, Helvetica, sans-serif" font-size="23px" font-weight="bold" fill="${theme.subText}" opacity="0.55">
-      ${prev1Tspans}
-    </text>` : ''}
+    <!-- Track Metadata Typography -->
+    <text x="${headerX + 80}" y="${headerY + 34}" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="18px" fill="#ffffff">${escapeXml(trackName.slice(0, 32))}</text>
+    <text x="${headerX + 80}" y="${headerY + 56}" font-family="system-ui, -apple-system, sans-serif" font-weight="600" font-size="13px" fill="${theme.subText}">${escapeXml(artistName.slice(0, 38))}</text>
 
-    <!-- Active Line: Glowing Layer -->
-    <text x="54" y="${activeStartY}" font-family="Arial, Helvetica, sans-serif" font-size="${activeFontSize}px" font-weight="900" fill="${theme.glowColor}" filter="url(#spotGlow)">
-      ${activeTspans}
-    </text>
-    <!-- Active Line: Crisp White Text Core -->
-    <text x="54" y="${activeStartY}" font-family="Arial, Helvetica, sans-serif" font-size="${activeFontSize}px" font-weight="900" fill="#ffffff">
-      ${activeTspans}
-    </text>
+    <!-- Dynamic Audio Waveform Equalizer Bars -->
+    <rect x="${width - headerX - 44}" y="${headerY + 39 - (barHeights[0] / 2)}" width="4" height="${barHeights[0]}" rx="2" fill="${theme.glowColor}" />
+    <rect x="${width - headerX - 35}" y="${headerY + 39 - (barHeights[1] / 2)}" width="4" height="${barHeights[1]}" rx="2" fill="${theme.glowColor}" />
+    <rect x="${width - headerX - 26}" y="${headerY + 39 - (barHeights[2] / 2)}" width="4" height="${barHeights[2]}" rx="2" fill="${theme.glowColor}" />
+    <rect x="${width - headerX - 17}" y="${headerY + 39 - (barHeights[3] / 2)}" width="4" height="${barHeights[3]}" rx="2" fill="${theme.glowColor}" />
 
-    <!-- Dimmed Upcoming Lines -->
-    ${next1Seg && next1StartY < footerY - 40 ? `
-    <text x="54" y="${next1StartY}" font-family="Arial, Helvetica, sans-serif" font-size="23px" font-weight="bold" fill="${theme.subText}" opacity="0.50">
-      ${next1Tspans}
-    </text>` : ''}
-
-    ${next2Seg && next2StartY < footerY - 20 ? `
-    <text x="54" y="${next2StartY}" font-family="Arial, Helvetica, sans-serif" font-size="20px" font-weight="bold" fill="${theme.mutedText}" opacity="0.25">
-      ${next2Tspans}
-    </text>` : ''}
-
-    <!-- Footer Progress Track & Filled Bar -->
-    <rect x="54" y="${footerY}" width="${width - 108}" height="4" rx="2" fill="#222c25" />
+    <!-- Footer Progress Bar Track & Filled Line -->
+    <rect x="54" y="${footerY}" width="${width - 108}" height="4" rx="2" fill="rgba(255, 255, 255, 0.12)" />
     <rect x="54" y="${footerY}" width="${progressW}" height="4" rx="2" fill="${theme.glowColor}" />
+    <circle cx="${54 + progressW}" cy="${footerY + 2}" r="4" fill="#ffffff" filter="url(#spotGlow)" />
 
-    <!-- Footer Badge & Time Label -->
-    <text x="54" y="${badgeY}" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="12px" fill="${theme.glowColor}" letter-spacing="2">SPOTIFY GLOW</text>
-    <text x="${width - 54}" y="${badgeY}" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="12px" fill="${theme.mutedText}">${formatDuration(elapsed)} / ${formatDuration(windowDuration)}</text>
+    <!-- Footer Labels -->
+    <text x="54" y="${badgeY}" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="11px" fill="${theme.glowColor}" letter-spacing="2">SPOTIFY GLOW</text>
+    <text x="${width - 54}" y="${badgeY}" text-anchor="end" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="12px" fill="${theme.mutedText}">${formatDuration(elapsed)} / ${formatDuration(windowDuration)}</text>
   </svg>
   `;
 }
@@ -368,6 +532,34 @@ export async function generateSpotifyGlowVideoMp4({
     throw new Error(`Gagal mengunduh audio lagu "${cleanQuery}".`);
   }
 
+  // Fetch official track artwork (iTunes 600x600, Spotify, or YouTube thumbnail)
+  let albumArtBase64 = null;
+  let ambientColor = null;
+
+  const candidateThumbnail = musicTrack.thumbnail || lyricsData.metadata?.artworkUrl;
+  if (candidateThumbnail) {
+    try {
+      const artRes = await fetch(candidateThumbnail, { signal: AbortSignal.timeout(5000) });
+      if (artRes.ok) {
+        const rawArtBuf = Buffer.from(await artRes.arrayBuffer());
+        const resizedArtBuf = await sharp(rawArtBuf)
+          .resize(128, 128, { fit: 'cover' })
+          .png()
+          .toBuffer();
+        albumArtBase64 = `data:image/png;base64,${resizedArtBuf.toString('base64')}`;
+
+        try {
+          const stats = await sharp(rawArtBuf).stats();
+          if (stats?.dominant && typeof stats.dominant.r === 'number') {
+            ambientColor = stats.dominant;
+          }
+        } catch {}
+      }
+    } catch (artErr) {
+      logger.debug('Gagal mengambil album art Spotify Glow:', artErr.message);
+    }
+  }
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nex_spotglow_'));
   try {
     const audioPath = path.join(tmpDir, 'track.mp3');
@@ -408,49 +600,63 @@ export async function generateSpotifyGlowVideoMp4({
     const rawEndTime = (lastSeg.time + (lastSeg.duration || 3.5));
     const windowDuration = Math.min(isFull ? 300 : 35, Math.max(8, rawEndTime - activeSegments[0].time));
 
+    // Precalculate segment words, layouts, and camera scroll targets
+    const { preparedSegments, cumulativeY, idealScrollY } = prepareSegments(activeSegments, isStory);
+
     const totalFrames = Math.max(25, Math.round(windowDuration * FPS));
     let currentSegIdx = 0;
-    let lastTransitionFrame = 0;
+    let currentScrollY = idealScrollY[0];
 
-    for (let f = 0; f < totalFrames; f++) {
-      const frameTime = activeSegments[0].time + (f / FPS);
+    // Frame batch processing for optimal memory and CPU performance
+    const BATCH_SIZE = 12;
 
-      // Cari segmen aktif saat ini
-      while (
-        currentSegIdx < activeSegments.length - 1 &&
-        frameTime >= activeSegments[currentSegIdx + 1].time
-      ) {
-        currentSegIdx++;
-        lastTransitionFrame = f;
+    for (let f = 0; f < totalFrames; f += BATCH_SIZE) {
+      const batchPromises = [];
+      const batchEnd = Math.min(totalFrames, f + BATCH_SIZE);
+
+      for (let bf = f; bf < batchEnd; bf++) {
+        const frameTime = activeSegments[0].time + (bf / FPS);
+
+        // Find current active segment
+        while (
+          currentSegIdx < preparedSegments.length - 1 &&
+          frameTime >= preparedSegments[currentSegIdx + 1].time
+        ) {
+          currentSegIdx++;
+        }
+
+        const targetScrollY = idealScrollY[currentSegIdx];
+        // Physical exponential smoothing for kinetic vertical scroll (critically damped)
+        currentScrollY += (targetScrollY - currentScrollY) * 0.16;
+
+        const svg = renderSpotifyGlowSvg({
+          trackName: lyricsData.trackName || 'Unknown Track',
+          artistName: lyricsData.artistName || 'Unknown Artist',
+          preparedSegments,
+          cumulativeY,
+          idealScrollY,
+          currentSegIdx,
+          currentTime: frameTime,
+          windowStartTime: activeSegments[0].time,
+          windowDuration,
+          themeKey: glowTheme,
+          width,
+          height,
+          currentScrollY,
+          albumArtBase64,
+          ambientColor,
+        });
+
+        const framePath = path.join(tmpDir, `frame_${String(bf + 1).padStart(5, '0')}.png`);
+        batchPromises.push(
+          sharp(Buffer.from(svg))
+            .png()
+            .toBuffer()
+            .then((buf) => fs.promises.writeFile(framePath, buf))
+        );
       }
 
-      // Smooth scroll interpolation (6 frames transition)
-      let scrollDy = 0;
-      const transAge = f - lastTransitionFrame;
-      if (transAge >= 0 && transAge <= 6) {
-        const t = transAge / 6;
-        // Ease-out cubic: 1 - (1-t)^3
-        const ease = 1 - Math.pow(1 - t, 3);
-        scrollDy = (1 - ease) * 36;
-      }
-
-      const svg = renderSpotifyGlowSvg({
-        trackName: lyricsData.trackName || 'Unknown Track',
-        artistName: lyricsData.artistName || 'Unknown Artist',
-        segments: activeSegments,
-        activeIndex: currentSegIdx,
-        currentTime: frameTime,
-        windowStartTime: activeSegments[0].time,
-        windowDuration,
-        themeKey: glowTheme,
-        width,
-        height,
-        scrollDy,
-      });
-
-      const framePngBuf = await sharp(Buffer.from(svg)).png().toBuffer();
-      const framePath = path.join(tmpDir, `frame_${String(f + 1).padStart(5, '0')}.png`);
-      fs.writeFileSync(framePath, framePngBuf);
+      await Promise.all(batchPromises);
     }
 
     const outMp4Path = path.join(tmpDir, 'output.mp4');
@@ -462,13 +668,13 @@ export async function generateSpotifyGlowVideoMp4({
       `-t ${windowDuration.toFixed(3)}`,
       `-i "${audioPath}"`,
       '-map 0:v -map 1:a',
-      '-c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p',
+      '-c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p',
       '-c:a aac -b:a 192k',
       '-movflags +faststart',
       `"${outMp4Path}"`,
     ].join(' ');
 
-    await execAsync(ffmpegCmd, { timeout: 90000 });
+    await execAsync(ffmpegCmd, { timeout: 120000 });
 
     if (!fs.existsSync(outMp4Path)) {
       throw new Error('Gagal merender video Spotify Glow MP4.');
