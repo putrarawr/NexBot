@@ -122,7 +122,17 @@ function formatDuration(sec) {
 
 export function getSegmentWords(seg, nextSegTime) {
   if (Array.isArray(seg.words) && seg.words.length > 0) {
-    return seg.words;
+    return seg.words.map((w) => {
+      const textVal = String(w.text || w.word || '').trim();
+      return {
+        ...w,
+        text: textVal,
+        word: textVal,
+        time: w.time,
+        duration: w.duration || 0.4,
+        endTime: w.endTime || (w.time + (w.duration || 0.4)),
+      };
+    }).filter((w) => w.text.length > 0);
   }
   const rawWords = (seg.text || '').trim().split(/\s+/).filter(Boolean);
   if (rawWords.length === 0) return [];
@@ -137,6 +147,7 @@ export function getSegmentWords(seg, nextSegTime) {
     const dur = totalDuration * weight;
     const wObj = {
       text: word,
+      word: word,
       time: curTime,
       duration: dur,
       endTime: curTime + dur,
@@ -153,16 +164,23 @@ export function wrapLyricsWords(words, maxChars = 26) {
   let currentLen = 0;
 
   for (const w of words) {
-    const wordLen = (w.text || '').length;
+    const wordText = String(w.text || w.word || '').trim();
+    const wordLen = wordText.length;
+    if (wordLen === 0) continue;
+    const normalizedWord = {
+      ...w,
+      text: wordText,
+      word: wordText,
+    };
     if (currentLine.length === 0) {
-      currentLine.push(w);
+      currentLine.push(normalizedWord);
       currentLen = wordLen;
     } else if (currentLen + 1 + wordLen <= maxChars) {
-      currentLine.push(w);
+      currentLine.push(normalizedWord);
       currentLen += 1 + wordLen;
     } else {
       lines.push(currentLine);
-      currentLine = [w];
+      currentLine = [normalizedWord];
       currentLen = wordLen;
     }
   }
@@ -192,7 +210,7 @@ export function wrapLyricsText(text, maxChars = 28) {
 }
 
 export function prepareSegments(segments, isStory = false) {
-  const wrapLimit = isStory ? 22 : 26;
+  const wrapLimit = isStory ? 24 : 26;
   const segmentGap = isStory ? 24 : 28;
 
   const prepared = segments.map((seg, idx) => {
@@ -282,25 +300,28 @@ export function computeWordLighting(w, currentTime) {
   };
 }
 
-function renderActiveTspans(wrappedLines, currentTime, activeLineHeight, theme, isGlowLayer) {
+function renderActiveTspans(wrappedLines, currentTime, activeLineHeight, lyricsX, theme, isGlowLayer) {
   let out = '';
   for (let lIdx = 0; lIdx < wrappedLines.length; lIdx++) {
     const line = wrappedLines[lIdx];
     for (let wIdx = 0; wIdx < line.length; wIdx++) {
       const w = line[wIdx];
+      const wordText = String(w.text || w.word || '');
+      if (!wordText) continue;
+
       const isLineStart = wIdx === 0;
-      const posAttr = isLineStart ? (lIdx === 0 ? 'x="54"' : `x="54" dy="${activeLineHeight}"`) : '';
+      const posAttr = isLineStart ? (lIdx === 0 ? `x="${lyricsX}"` : `x="${lyricsX}" dy="${activeLineHeight}"`) : '';
 
       const lighting = computeWordLighting(w, currentTime);
 
       if (isGlowLayer) {
         if (lighting.glowAlpha > 0.02) {
-          out += `<tspan ${posAttr} fill="${theme.glowColor}" opacity="${lighting.glowAlpha.toFixed(2)}">${escapeXml(w.text)} </tspan>`;
+          out += `<tspan ${posAttr} fill="${theme.glowColor}" opacity="${lighting.glowAlpha.toFixed(2)}">${escapeXml(wordText)} </tspan>`;
         } else {
-          out += `<tspan ${posAttr} fill="transparent" opacity="0">${escapeXml(w.text)} </tspan>`;
+          out += `<tspan ${posAttr} fill="transparent" opacity="0">${escapeXml(wordText)} </tspan>`;
         }
       } else {
-        out += `<tspan ${posAttr} fill="#ffffff" opacity="${lighting.textAlpha.toFixed(2)}">${escapeXml(w.text)} </tspan>`;
+        out += `<tspan ${posAttr} fill="#ffffff" opacity="${lighting.textAlpha.toFixed(2)}">${escapeXml(wordText)} </tspan>`;
       }
     }
   }
@@ -336,10 +357,13 @@ export function renderSpotifyGlowSvg({
   const headerW = width - (headerX * 2);
   const headerH = 78;
 
+  // Horizontal padding for lyrics
+  const lyricsX = isStory ? 40 : 54;
+
   // Progress
   const elapsed = Math.max(0, currentTime - windowStartTime);
   const progressRatio = Math.min(1.0, Math.max(0, elapsed / Math.max(1, windowDuration)));
-  const progressW = Math.max(8, (width - 108) * progressRatio);
+  const progressW = Math.max(8, (width - (lyricsX * 2)) * progressRatio);
 
   // Dynamic Audio Visualizer Equalizer Bars
   const barHeights = [
@@ -383,18 +407,18 @@ export function renderSpotifyGlowSvg({
     const dist = idx - activeIdx;
 
     // Skip off-screen segments
-    if (segY < -100 || segY > height + 80) {
+    if (segY < -120 || segY > height + 100) {
       return '';
     }
 
     if (dist === 0) {
       return `
         <!-- Active Segment (Focal Center: Razor Sharp + Luminous Glow) -->
-        <text x="54" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900" filter="url(#spotGlow)">
-          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, theme, true)}
+        <text x="${lyricsX}" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900" filter="url(#spotGlow)">
+          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, lyricsX, theme, true)}
         </text>
-        <text x="54" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900">
-          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, theme, false)}
+        <text x="${lyricsX}" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900">
+          ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, lyricsX, theme, false)}
         </text>
       `;
     }
@@ -407,33 +431,33 @@ export function renderSpotifyGlowSvg({
       // Lines below active (Upcoming lyrics)
       if (dist === 1) {
         blurFilterAttr = 'filter="url(#spotBlurNext1)"';
-        opacity = '0.55';
+        opacity = '0.58';
       } else if (dist === 2) {
         blurFilterAttr = 'filter="url(#spotBlurNext2)"';
-        opacity = '0.32';
+        opacity = '0.36';
       } else {
         blurFilterAttr = 'filter="url(#spotBlurNext3)"';
-        opacity = '0.16';
+        opacity = '0.18';
       }
     } else {
       // Lines above active (Past lyrics)
       if (dist === -1) {
         blurFilterAttr = 'filter="url(#spotBlurPast1)"';
-        opacity = '0.42';
+        opacity = '0.45';
       } else {
         blurFilterAttr = 'filter="url(#spotBlurPast2)"';
-        opacity = '0.20';
+        opacity = '0.22';
       }
     }
 
     const linesText = seg.wrappedLines.map((lineWords, lIdx) => {
-      const lineStr = lineWords.map((w) => w.text).join(' ');
-      const dy = lIdx === 0 ? 0 : 30;
-      return `<tspan x="54" dy="${dy}">${escapeXml(lineStr)}</tspan>`;
+      const lineStr = lineWords.map((w) => (w.text || w.word || '')).filter(Boolean).join(' ');
+      const dy = lIdx === 0 ? 0 : (isStory ? 28 : 30);
+      return `<tspan x="${lyricsX}" dy="${dy}">${escapeXml(lineStr)}</tspan>`;
     }).join('');
 
     return `
-      <text x="54" y="${segY + 26}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="22px" font-weight="700" fill="#ffffff" opacity="${opacity}" ${blurFilterAttr}>
+      <text x="${lyricsX}" y="${segY + 26}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="22px" font-weight="700" fill="#ffffff" opacity="${opacity}" ${blurFilterAttr}>
         ${linesText}
       </text>
     `;
@@ -464,32 +488,32 @@ export function renderSpotifyGlowSvg({
         </feMerge>
       </filter>
 
-      <!-- Depth-of-Field Blur Filters for Upcoming and Past Lyrics -->
+      <!-- Refined Depth-of-Field Blur Filters for Upcoming and Past Lyrics -->
       <filter id="spotBlurPast1" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" />
       </filter>
       <filter id="spotBlurPast2" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.4" />
       </filter>
       <filter id="spotBlurNext1" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" />
       </filter>
       <filter id="spotBlurNext2" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="3.6" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.8" />
       </filter>
       <filter id="spotBlurNext3" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="5.8" />
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" />
       </filter>
 
       <!-- Lyrics Fade Mask for Cinematic Top and Bottom Dissolve -->
       <linearGradient id="fadeGrad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#ffffff" stop-opacity="0" />
-        <stop offset="16%" stop-color="#ffffff" stop-opacity="1" />
-        <stop offset="84%" stop-color="#ffffff" stop-opacity="1" />
+        <stop offset="14%" stop-color="#ffffff" stop-opacity="1" />
+        <stop offset="86%" stop-color="#ffffff" stop-opacity="1" />
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
       </linearGradient>
       <mask id="lyricsMask">
-        <rect x="0" y="${headerY + headerH + 10}" width="${width}" height="${footerY - headerY - headerH - 24}" fill="url(#fadeGrad)" />
+        <rect x="0" y="${headerY + headerH + 6}" width="${width}" height="${footerY - headerY - headerH - 18}" fill="url(#fadeGrad)" />
       </mask>
 
       <!-- Clip Path for Album Artwork -->
@@ -535,13 +559,13 @@ export function renderSpotifyGlowSvg({
     <rect x="${width - headerX - 17}" y="${headerY + 39 - (barHeights[3] / 2)}" width="4" height="${barHeights[3]}" rx="2" fill="${theme.glowColor}" />
 
     <!-- Footer Progress Bar Track & Filled Line -->
-    <rect x="54" y="${footerY}" width="${width - 108}" height="4" rx="2" fill="rgba(255, 255, 255, 0.12)" />
-    <rect x="54" y="${footerY}" width="${progressW}" height="4" rx="2" fill="${theme.glowColor}" />
-    <circle cx="${54 + progressW}" cy="${footerY + 2}" r="4.5" fill="#ffffff" filter="url(#spotGlow)" />
+    <rect x="${lyricsX}" y="${footerY}" width="${width - (lyricsX * 2)}" height="4" rx="2" fill="rgba(255, 255, 255, 0.12)" />
+    <rect x="${lyricsX}" y="${footerY}" width="${progressW}" height="4" rx="2" fill="${theme.glowColor}" />
+    <circle cx="${lyricsX + progressW}" cy="${footerY + 2}" r="4.5" fill="#ffffff" filter="url(#spotGlow)" />
 
     <!-- Footer Labels -->
-    <text x="54" y="${badgeY}" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="11px" fill="${theme.glowColor}" letter-spacing="2">SPOTIFY GLOW</text>
-    <text x="${width - 54}" y="${badgeY}" text-anchor="end" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="12px" fill="${theme.mutedText}">${formatDuration(elapsed)} / ${formatDuration(windowDuration)}</text>
+    <text x="${lyricsX}" y="${badgeY}" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="11px" fill="${theme.glowColor}" letter-spacing="2">SPOTIFY GLOW</text>
+    <text x="${width - lyricsX}" y="${badgeY}" text-anchor="end" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="12px" fill="${theme.mutedText}">${formatDuration(elapsed)} / ${formatDuration(windowDuration)}</text>
   </svg>
   `;
 }
@@ -577,7 +601,17 @@ export async function generateSpotifyGlowVideoMp4({
     segments = lyricsData.wordSegments.map((ws) => ({
       ...ws,
       time: ws.time,
-      words: (ws.words || []).map((w) => ({ ...w, time: w.time })),
+      words: (ws.words || []).map((w) => {
+        const textVal = String(w.text || w.word || '').trim();
+        return {
+          ...w,
+          text: textVal,
+          word: textVal,
+          time: w.time,
+          duration: w.duration || 0.4,
+          endTime: w.endTime || (w.time + (w.duration || 0.4)),
+        };
+      }).filter((w) => w.text.length > 0),
     }));
   } else {
     const syncedStr = lyricsData.syncedLyrics || buildSyntheticLrcFromPlain(lyricsData.plainLyrics, lyricsData.duration);
