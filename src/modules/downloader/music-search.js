@@ -237,7 +237,8 @@ export async function downloadMusicTrack(target, metadata = {}) {
           if (metadata.artist) {
             const normArtist = metadata.artist.replace(/[^a-z0-9]/gi, '').toLowerCase();
             const normTitleChan = `${title} ${channel}`.replace(/[^a-z0-9]/gi, '').toLowerCase();
-            if (normArtist && normTitleChan.includes(normArtist)) {
+            const artistTokens = metadata.artist.toLowerCase().split(/[\s,&/]+/).filter((t) => t.length > 2 && !['feat', 'featuring', 'with'].includes(t));
+            if ((normArtist && normTitleChan.includes(normArtist)) || artistTokens.some((t) => normTitleChan.includes(t))) {
               score += 25;
             }
           }

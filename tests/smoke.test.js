@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords, parseReffParam, findReffClusters } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords, parseReffParam, findReffClusters, parseSongSearchQuery } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -432,6 +432,28 @@ async function runAllTests() {
 
     const customReffWinLast = selectLrcWindow(sampleSegments, { customReff: { type: 'last' } });
     assert.equal(customReffWinLast.activeSegments[0].time, 55);
+
+    const q1 = parseSongSearchQuery('Fix You by Coldplay');
+    assert.equal(q1.candidates[0].track, 'Fix You');
+    assert.equal(q1.candidates[0].artist, 'Coldplay');
+
+    const q2 = parseSongSearchQuery('Godzilla ft Juice WRLD by Eminem');
+    assert.equal(q2.candidates[0].track, 'Godzilla');
+    assert.equal(q2.candidates[0].artist, 'Eminem');
+    assert.equal(q2.featArtist, 'Juice WRLD');
+
+    const q3 = parseSongSearchQuery('Die With A Smile by Bruno Mars ft Lady Gaga');
+    assert.equal(q3.candidates[0].track, 'Die With A Smile');
+    assert.equal(q3.candidates[0].artist, 'Bruno Mars');
+    assert.equal(q3.featArtist, 'Lady Gaga');
+
+    const q4 = parseSongSearchQuery('Finesse ft Cardi B');
+    assert.equal(q4.featArtist, 'Cardi B');
+    assert.equal(q4.candidates[0].track, 'Finesse');
+
+    const q5 = parseSongSearchQuery('Stand By Me');
+    assert.equal(q5.candidates.length, 0);
+    assert.ok(q5.searchTerms.includes('Stand By Me'));
 
     const searchWin = selectLrcWindow(sampleSegments, { lyricSearch: 'verse tiga' });
     assert.equal(searchWin.activeSegments[0].text, 'verse tiga');

@@ -1563,14 +1563,22 @@ export function extractCleanTrackTitle(rawTrack) {
   return String(rawTrack || '')
     .replace(/\s*[\(\[](?:feat|ft|with|prod|remaster|version)\b.*?[\]\)]/gi, '')
     .replace(/\s*[-–—]\s*(?:feat|ft|with)\b.*/gi, '')
+    .replace(/\s+(?:feat|ft|with)\.?\s+.*/gi, '')
     .trim();
 }
 
-export function hasNonFeatSubtitle(rawTrack) {
-  const withoutFeat = String(rawTrack || '')
+export function hasNonFeatSubtitle(rawTrack, featArtist = '') {
+  let withoutFeat = String(rawTrack || '')
     .replace(/\s*[\(\[](?:feat|ft|with)\b.*?[\]\)]/gi, '')
     .replace(/\s*[-–—]\s*(?:feat|ft|with)\b.*/gi, '')
+    .replace(/\s+(?:feat|ft|with)\.?\s+.*/gi, '')
     .trim();
+  if (featArtist) {
+    const normFeat = normalizeFuzzy(featArtist);
+    if (normalizeFuzzy(rawTrack).includes(normFeat)) {
+      withoutFeat = withoutFeat.replace(/[\(\[](?:remix|refix|edit|mix)[\]\)]/gi, '').trim();
+    }
+  }
   return /\(.*?\)|\[.*?\]/.test(withoutFeat);
 }
 
@@ -1584,17 +1592,106 @@ export function normalizeFuzzy(str) {
     .trim();
 }
 
-export async function fetchSongLyricsWithSync(query) {
+export function parseSongSearchQuery(query) {
   const clean = sanitizeLrcMeta(query);
-  if (!clean) return null;
+  if (!clean) {
+    return {
+      cleanSearchTerm: '',
+      featArtist: '',
+      candidates: [],
+      searchTerms: [],
+    };
+  }
 
-  const cleanSearchTerm = clean.replace(/[-–—|/]/g, ' ').replace(/\s+/g, ' ').trim();
-  const searchTokens = normalizeFuzzy(cleanSearchTerm).split(/\s+/).filter((t) => t.length > 1);
+  const candidates = [];
+  const searchTerms = new Set();
+  searchTerms.add(clean);
 
-  // Deteksi kemungkinan format pemisah "Judul - Artis" atau "Artis - Judul"
-  const rawParts = clean.split(/\s+[-–—|]\s+/).map((s) => s.trim()).filter(Boolean);
-  const userCand1 = rawParts.length >= 2 ? { track: rawParts[0], artist: rawParts.slice(1).join(' ') } : null;
-  const userCand2 = rawParts.length >= 2 ? { track: rawParts[rawParts.length - 1], artist: rawParts.slice(0, -1).join(' ') } : null;
+  // 1. Explicit dash / bar delimiter
+  const dashParts = clean.split(/\s+[-–—|]\s+/).map((s) => s.trim()).filter(Boolean);
+  if (dashParts.length >= 2) {
+    candidates.push({ track: dashParts[0], artist: dashParts.slice(1).join(' ') });
+    candidates.push({ track: dashParts[dashParts.length - 1], artist: dashParts.slice(0, -1).join(' ') });
+  }
+
+  let featArtist = '';
+
+  // Pola A: track ft feat by artist (contoh: "Godzilla ft Juice WRLD by Eminem")
+  const ftByMatch = /^(.+?)\s+(?:feat\.?|ft\.?|featuring)\s+(.+?)\s+by\s+(.+)$/i.exec(clean);
+  // Pola B: track by artist ft feat (contoh: "Die With A Smile by Bruno Mars ft Lady Gaga")
+  const byFtMatch = /^(.+?)\s+by\s+(.+?)\s+(?:feat\.?|ft\.?|featuring)\s+(.+)$/i.exec(clean);
+  // Pola C: track by artist (contoh: "Fix You by Coldplay" atau "Duka by Last Child")
+  const byMatch = /^(.+?)\s+by\s+(.+)$/i.exec(clean);
+
+  if (ftByMatch) {
+    const track = ftByMatch[1].trim();
+    featArtist = ftByMatch[2].trim();
+    const artist = ftByMatch[3].trim();
+    candidates.push({ track, artist, feat: featArtist });
+    searchTerms.add(`${artist} ${track}`);
+    searchTerms.add(`${track} ${artist}`);
+    searchTerms.add(`${track} ${featArtist}`);
+    searchTerms.add(track);
+  } else if (byFtMatch) {
+    const track = byFtMatch[1].trim();
+    const artist = byFtMatch[2].trim();
+    featArtist = byFtMatch[3].trim();
+    candidates.push({ track, artist, feat: featArtist });
+    searchTerms.add(`${artist} ${track}`);
+    searchTerms.add(`${track} ${artist}`);
+    searchTerms.add(`${track} ${featArtist}`);
+    searchTerms.add(track);
+  } else if (byMatch) {
+    const beforeBy = byMatch[1].trim();
+    const afterBy = byMatch[2].trim();
+    const isPronounOrRepeat = /^(me|you|us|him|her|them|myself|yourself|side|day|step|bit|one)$/i.test(afterBy) || beforeBy.toLowerCase() === afterBy.toLowerCase();
+    if (!isPronounOrRepeat) {
+      candidates.push({ track: beforeBy, artist: afterBy });
+      searchTerms.add(`${beforeBy} ${afterBy}`);
+    }
+  } else {
+    // Pola D: track ft/feat (contoh: "Godzilla ft Juice WRLD" atau "Finesse ft Cardi B")
+    const ftRegex = /\s*(?:[-–—|]\s*)?(?:[\(\[])?(?:feat\.?|ft\.?|featuring)\s+([^\]\)]+)[\]\)]?/i;
+    const ftMatch = ftRegex.exec(clean);
+    if (ftMatch) {
+      featArtist = ftMatch[1].trim();
+      const cleanNoFt = clean.replace(ftRegex, '').trim();
+      if (cleanNoFt) {
+        candidates.push({ track: cleanNoFt, artist: '', feat: featArtist });
+        searchTerms.add(`${cleanNoFt} ${featArtist}`);
+        searchTerms.add(cleanNoFt);
+      }
+    }
+  }
+
+  // Tanpa kata sambung 'by' untuk query full-text search
+  const withoutBy = clean.replace(/\s+by\s+/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (withoutBy !== clean) {
+    searchTerms.add(withoutBy);
+  }
+
+  return {
+    cleanSearchTerm: clean,
+    featArtist,
+    candidates,
+    searchTerms: Array.from(searchTerms).filter(Boolean),
+  };
+}
+
+export async function fetchSongLyricsWithSync(query) {
+  const parsedQuery = parseSongSearchQuery(query);
+  const { cleanSearchTerm, featArtist, candidates, searchTerms } = parsedQuery;
+  if (!cleanSearchTerm) return null;
+
+  const rawClean = cleanSearchTerm.replace(/[-–—|/]/g, ' ').replace(/\s+/g, ' ').trim();
+  const rawTokens = normalizeFuzzy(rawClean).split(/\s+/).filter((t) => t.length > 1);
+  const searchTokens = rawTokens.filter((t) => {
+    if (rawTokens.length <= 2) return true;
+    return !['by', 'ft', 'feat', 'with', 'and'].includes(t);
+  });
+
+  const userCand1 = candidates[0] || null;
+  const userCand2 = candidates[1] || null;
 
   let canonicalTrack = cleanSearchTerm;
   let canonicalArtist = '';
@@ -1603,18 +1700,28 @@ export async function fetchSongLyricsWithSync(query) {
 
   // 1. Coba cari metadata lagu di iTunes (ID store + Global store)
   try {
-    const itunesU1 = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearchTerm)}&country=id&entity=song&limit=8`;
-    const itunesU2 = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanSearchTerm)}&entity=song&limit=8`;
+    const primaryTerm = searchTerms[0] || cleanSearchTerm;
+    const secondaryTerm = searchTerms.find((t) => t !== primaryTerm);
+    const itunesU1 = `https://itunes.apple.com/search?term=${encodeURIComponent(primaryTerm)}&country=id&entity=song&limit=8`;
+    const itunesU2 = `https://itunes.apple.com/search?term=${encodeURIComponent(primaryTerm)}&entity=song&limit=8`;
 
-    const [resId, resGlobal] = await Promise.all([
+    const itunesFetches = [
       fetch(itunesU1, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
       fetch(itunesU2, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] })),
-    ]);
+    ];
+    if (secondaryTerm) {
+      itunesFetches.push(
+        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(secondaryTerm)}&country=id&entity=song&limit=8`, { signal: AbortSignal.timeout(3500) }).then((r) => r.json()).catch(() => ({ results: [] }))
+      );
+    }
 
+    const itunesResponses = await Promise.all(itunesFetches);
     const itunesMap = new Map();
-    for (const item of [...(resId.results || []), ...(resGlobal.results || [])]) {
-      if (item.trackId && !itunesMap.has(item.trackId)) {
-        itunesMap.set(item.trackId, item);
+    for (const res of itunesResponses) {
+      for (const item of (res.results || [])) {
+        if (item.trackId && !itunesMap.has(item.trackId)) {
+          itunesMap.set(item.trackId, item);
+        }
       }
     }
     const combinedItunes = Array.from(itunesMap.values());
@@ -1636,9 +1743,21 @@ export async function fetchSongLyricsWithSync(query) {
           score += 40;
         }
 
+        // Cek kecocokan featured artist jika pengguna menyertakan ft / feat
+        const featRequested = Boolean(featArtist);
+        const featMatched = featRequested && (
+          normalizeFuzzy(combinedText).includes(normalizeFuzzy(featArtist)) ||
+          normalizeFuzzy(rawTrack).includes(normalizeFuzzy(featArtist)) ||
+          normArtist.includes(normalizeFuzzy(featArtist))
+        );
+
+        if (featMatched) {
+          score += 65;
+        }
+
         // Utamakan lagu asli tanpa subtitle/remix/refix dibanding versi alternatif
-        const subtitlePresent = hasNonFeatSubtitle(rawTrack);
-        if (!subtitlePresent) {
+        const subtitlePresent = hasNonFeatSubtitle(rawTrack, featArtist);
+        if (!subtitlePresent || featMatched) {
           score += 40;
         } else {
           score -= 30;
@@ -1657,36 +1776,38 @@ export async function fetchSongLyricsWithSync(query) {
           }
         }
 
-        // Jika query 2+ kata dan trackMatches 0, beri penalti
-        if (searchTokens.length >= 2 && trackMatches === 0 && !userCand1 && !userCand2) {
+        // Jika query 2+ kata dan trackMatches 0 serta bukan feat match, beri penalti
+        if (searchTokens.length >= 2 && trackMatches === 0 && !userCand1 && !userCand2 && !featMatched) {
           score -= 75;
         }
 
-        // Jika user sengaja menulis "Judul - Artis", pastikan keduanya ada kecocokan.
-        // Jangan beri penalti jika user hanya mencari judul panjang tanpa nama artis.
-        if ((userCand1 || userCand2) && artistMatches === 0 && trackMatches === 0) {
+        if ((userCand1 || userCand2) && artistMatches === 0 && trackMatches === 0 && !featMatched) {
           score -= 50;
-        } else if (searchTokens.length >= 3 && artistMatches === 0 && trackMatches < 2 && normTrack !== normSearch) {
+        } else if (searchTokens.length >= 3 && artistMatches === 0 && trackMatches < 2 && normTrack !== normSearch && !featMatched) {
           score -= 35;
         }
 
-        if (userCand1) {
-          if (normTrack.includes(normalizeFuzzy(userCand1.track))) score += 40;
-          if (normArtist.includes(normalizeFuzzy(userCand1.artist))) score += 35;
-        }
-        if (userCand2) {
-          if (normTrack.includes(normalizeFuzzy(userCand2.track))) score += 40;
-          if (normArtist.includes(normalizeFuzzy(userCand2.artist))) score += 35;
+        for (const cand of candidates) {
+          if (cand.track && normTrack.includes(normalizeFuzzy(cand.track))) score += 40;
+          if (cand.artist && normArtist.includes(normalizeFuzzy(cand.artist))) score += 35;
+          if (cand.feat && featMatched) score += 30;
         }
 
         const modifiers = ['lofi', 'remix', 'refix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
         for (const mod of modifiers) {
+          if (featMatched && (mod === 'remix' || mod === 'refix')) continue;
           if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combinedText)) {
             score -= 55;
           }
         }
 
-        return { item, score, trackMatches, artistMatches };
+        const extraDjRemix = /[\(\[][^\]\)]+\s+(?:remix|mix|edit|dub|flip)[\]\)]/i.test(rawTrack) &&
+          !/[\(\[](?:official\s+)?(?:remix|version|audio|video|edit)[\]\)]/i.test(rawTrack);
+        if (extraDjRemix && !cleanSearchTerm.toLowerCase().includes('remix')) {
+          score -= 35;
+        }
+
+        return { item, score, trackMatches, artistMatches, featMatched };
       }).sort((a, b) => b.score - a.score);
 
       const bestItunes = scoredItunes[0]?.item;
@@ -1694,7 +1815,7 @@ export async function fetchSongLyricsWithSync(query) {
         canonicalTrack = sanitizeLrcMeta(bestItunes.trackName) || cleanSearchTerm;
         canonicalArtist = sanitizeLrcMeta(bestItunes.artistName);
         canonicalDuration = (bestItunes.trackTimeMillis || 0) / 1000;
-      } else if (bestItunes && scoredItunes[0].artistMatches > 0) {
+      } else if (bestItunes && (scoredItunes[0].artistMatches > 0 || scoredItunes[0].featMatched)) {
         // Jika artis cocok tapi judul tidak cocok langsung, simpan sebagai fallback
         itunesFallbackItem = {
           track: sanitizeLrcMeta(bestItunes.trackName),
@@ -1716,12 +1837,16 @@ export async function fetchSongLyricsWithSync(query) {
 
   // 2. Coba cari word-by-word synced lyrics dari LyricsPlus (Apple Music/Spotify official sync)
   const plusTryList = [];
+  if (canonicalTrack && canonicalArtist) plusTryList.push({ track: canonicalTrack, artist: canonicalArtist });
   if (baseTrack && baseArtist) plusTryList.push({ track: baseTrack, artist: baseArtist });
-  if (userCand1 && (userCand1.track !== baseTrack || userCand1.artist !== baseArtist)) {
-    plusTryList.push({ track: userCand1.track, artist: userCand1.artist });
+  if (featArtist && baseTrack && baseArtist) {
+    plusTryList.push({ track: `${baseTrack} (feat. ${featArtist})`, artist: baseArtist });
+    plusTryList.push({ track: baseTrack, artist: `${baseArtist} feat. ${featArtist}` });
+    plusTryList.push({ track: baseTrack, artist: `${baseArtist} & ${featArtist}` });
   }
-  if (userCand2) {
-    plusTryList.push({ track: userCand2.track, artist: userCand2.artist });
+  for (const cand of candidates) {
+    if (cand.track && cand.artist) plusTryList.push({ track: cand.track, artist: cand.artist });
+    if (cand.track && cand.feat) plusTryList.push({ track: cand.track, artist: `${cand.artist || baseArtist || ''} feat. ${cand.feat}`.trim() });
   }
   plusTryList.push({ track: cleanSearchTerm, artist: '' });
   if (itunesFallbackItem) {
@@ -1788,8 +1913,10 @@ export async function fetchSongLyricsWithSync(query) {
   // 3a. Direct get LRCLIB
   const lrcGetPairs = [];
   if (baseTrack && baseArtist) lrcGetPairs.push({ track: baseTrack, artist: baseArtist });
-  if (userCand1) lrcGetPairs.push({ track: userCand1.track, artist: userCand1.artist });
-  if (userCand2) lrcGetPairs.push({ track: userCand2.track, artist: userCand2.artist });
+  for (const cand of candidates) {
+    if (cand.track && cand.artist) lrcGetPairs.push({ track: cand.track, artist: cand.artist });
+    if (cand.track && cand.feat) lrcGetPairs.push({ track: cand.track, artist: `${cand.artist || ''} feat. ${cand.feat}`.trim() });
+  }
   if (itunesFallbackItem) lrcGetPairs.push({ track: itunesFallbackItem.track, artist: itunesFallbackItem.artist });
 
   for (const pair of lrcGetPairs) {
@@ -1808,18 +1935,19 @@ export async function fetchSongLyricsWithSync(query) {
 
   // 3b. Search queries di LRCLIB secara paralel
   const searchQueries = [];
-  searchQueries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(cleanSearchTerm)}`);
+  for (const term of searchTerms) {
+    searchQueries.push(`https://lrclib.net/api/search?q=${encodeURIComponent(term)}`);
+  }
 
   if (baseArtist && baseTrack) {
     searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}&artist_name=${encodeURIComponent(baseArtist)}`);
   }
-  if (userCand1) {
-    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(userCand1.track)}&artist_name=${encodeURIComponent(userCand1.artist)}`);
+  for (const cand of candidates) {
+    if (cand.track && cand.artist) {
+      searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(cand.track)}&artist_name=${encodeURIComponent(cand.artist)}`);
+    }
   }
-  if (userCand2) {
-    searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(userCand2.track)}&artist_name=${encodeURIComponent(userCand2.artist)}`);
-  }
-  if (baseTrack && baseTrack !== cleanSearchTerm) {
+  if (baseTrack && !searchTerms.includes(baseTrack)) {
     searchQueries.push(`https://lrclib.net/api/search?track_name=${encodeURIComponent(baseTrack)}`);
   }
   if (itunesFallbackItem) {
@@ -1869,9 +1997,17 @@ export async function fetchSongLyricsWithSync(query) {
       const normItemArtist = normalizeFuzzy(item.artistName);
       const combined = `${rawItemTrack} ${item.artistName || ''}`.toLowerCase();
 
+      const featRequested = Boolean(featArtist);
+      const featMatched = featRequested && (
+        normalizeFuzzy(combined).includes(normalizeFuzzy(featArtist)) ||
+        normItemTrack.includes(normalizeFuzzy(featArtist)) ||
+        normItemArtist.includes(normalizeFuzzy(featArtist))
+      );
+      if (featMatched) score += 40;
+
       // Utamakan lagu asli tanpa subtitle/remix/refix
-      const subtitlePresent = hasNonFeatSubtitle(rawItemTrack);
-      if (!subtitlePresent) {
+      const subtitlePresent = hasNonFeatSubtitle(rawItemTrack, featArtist);
+      if (!subtitlePresent || featMatched) {
         score += 35;
       } else {
         score -= 45;
@@ -1880,9 +2016,16 @@ export async function fetchSongLyricsWithSync(query) {
       // Penalti cover, karaoke, remix
       const modifiers = ['lofi', 'remix', 'refix', 'cover', 'parodi', 'parody', 'karaoke', 'instrumental', 'tribute', 'sped up', 'slowed', 'reverb', 'acoustic', 'live', 'backing track', 'originally performed by'];
       for (const mod of modifiers) {
+        if (featMatched && (mod === 'remix' || mod === 'refix')) continue;
         if (!cleanSearchTerm.toLowerCase().includes(mod) && new RegExp(`\\b${mod}\\b`, 'i').test(combined)) {
           score -= 60;
         }
+      }
+
+      const extraDjRemix = /[\(\[][^\]\)]+\s+(?:remix|mix|edit|dub|flip)[\]\)]/i.test(rawItemTrack) &&
+        !/[\(\[](?:official\s+)?(?:remix|version|audio|video|edit)[\]\)]/i.test(rawItemTrack);
+      if (extraDjRemix && !cleanSearchTerm.toLowerCase().includes('remix')) {
+        score -= 35;
       }
 
       // Skor kecocokan durasi (jika durasi canonical dari iTunes tersedia)
