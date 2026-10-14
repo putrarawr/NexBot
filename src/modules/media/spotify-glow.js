@@ -229,6 +229,59 @@ export function prepareSegments(segments, isStory = false) {
   };
 }
 
+export function computeWordLighting(w, currentTime) {
+  const start = w.time;
+  const end = w.time + Math.max(0.18, w.duration || 0.38);
+
+  // 1. Sebelum kata dimulai (lebih dari 0.12s sebelum mulai)
+  if (currentTime < start - 0.12) {
+    return {
+      glowAlpha: 0,
+      textAlpha: 0.32,
+      isCurrent: false,
+    };
+  }
+
+  // 2. Fase attack / mekar halus (dari start - 0.12s hingga start + 0.12s)
+  if (currentTime < start + 0.12) {
+    const t = Math.max(0, Math.min(1, (currentTime - (start - 0.12)) / 0.24));
+    // Smooth cubic ease-in
+    const easeIn = t * t * (3 - 2 * t);
+    return {
+      glowAlpha: easeIn * 0.96,
+      textAlpha: 0.32 + 0.68 * easeIn,
+      isCurrent: true,
+    };
+  }
+
+  // 3. Fase artikulasi stabil (saat vokal kata sedang dinyanyikan)
+  if (currentTime < end - 0.08) {
+    return {
+      glowAlpha: 1.0,
+      textAlpha: 1.0,
+      isCurrent: true,
+    };
+  }
+
+  // 4. Fase decay / crossfade halus ke kata berikutnya (dari end - 0.08s hingga end + 0.24s)
+  if (currentTime < end + 0.24) {
+    const t = Math.max(0, Math.min(1, (currentTime - (end - 0.08)) / 0.32));
+    const easeOut = 1 - Math.pow(t, 2);
+    return {
+      glowAlpha: easeOut * 0.80,
+      textAlpha: 1.0,
+      isCurrent: t < 0.4,
+    };
+  }
+
+  // 5. Kata yang sudah selesai dinyanyikan (putih bersih permanen)
+  return {
+    glowAlpha: 0,
+    textAlpha: 0.95,
+    isCurrent: false,
+  };
+}
+
 function renderActiveTspans(wrappedLines, currentTime, activeLineHeight, theme, isGlowLayer) {
   let out = '';
   for (let lIdx = 0; lIdx < wrappedLines.length; lIdx++) {
@@ -238,33 +291,17 @@ function renderActiveTspans(wrappedLines, currentTime, activeLineHeight, theme, 
       const isLineStart = wIdx === 0;
       const posAttr = isLineStart ? (lIdx === 0 ? 'x="54"' : `x="54" dy="${activeLineHeight}"`) : '';
 
-      const isPast = currentTime >= (w.time + w.duration);
-      const isActive = currentTime >= w.time && currentTime < (w.time + w.duration);
+      const lighting = computeWordLighting(w, currentTime);
 
-      let fill;
-      let opacity = '1';
       if (isGlowLayer) {
-        if (isActive) {
-          fill = theme.glowColor;
-          opacity = '1.0';
+        if (lighting.glowAlpha > 0.02) {
+          out += `<tspan ${posAttr} fill="${theme.glowColor}" opacity="${lighting.glowAlpha.toFixed(2)}">${escapeXml(w.text)} </tspan>`;
         } else {
-          fill = 'transparent';
-          opacity = '0';
+          out += `<tspan ${posAttr} fill="transparent" opacity="0">${escapeXml(w.text)} </tspan>`;
         }
       } else {
-        if (isActive) {
-          fill = '#ffffff';
-          opacity = '1.0';
-        } else if (isPast) {
-          fill = '#ffffff';
-          opacity = '0.94';
-        } else {
-          fill = '#ffffff';
-          opacity = '0.32';
-        }
+        out += `<tspan ${posAttr} fill="#ffffff" opacity="${lighting.textAlpha.toFixed(2)}">${escapeXml(w.text)} </tspan>`;
       }
-
-      out += `<tspan ${posAttr} fill="${fill}" opacity="${opacity}">${escapeXml(w.text)} </tspan>`;
     }
   }
   return out;
@@ -340,7 +377,7 @@ export function renderSpotifyGlowSvg({
     ambientFill = `rgb(${ambientColor.r}, ${ambientColor.g}, ${ambientColor.b})`;
   }
 
-  // Build rendered lyrics elements
+  // Build rendered lyrics elements with graduated depth-of-field blur on upcoming and past lines
   const lyricsElements = prepList.map((seg, idx) => {
     const segY = cumList[idx] + activeScroll;
     const dist = idx - activeIdx;
@@ -352,7 +389,7 @@ export function renderSpotifyGlowSvg({
 
     if (dist === 0) {
       return `
-        <!-- Active Segment -->
+        <!-- Active Segment (Focal Center: Razor Sharp + Luminous Glow) -->
         <text x="54" y="${segY + 30}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="${activeFontSize}px" font-weight="900" filter="url(#spotGlow)">
           ${renderActiveTspans(seg.wrappedLines, currentTime, activeLineHeight, theme, true)}
         </text>
@@ -362,8 +399,33 @@ export function renderSpotifyGlowSvg({
       `;
     }
 
-    const absDist = Math.abs(dist);
-    const opacity = absDist === 1 ? '0.45' : absDist === 2 ? '0.22' : '0.10';
+    // Inactive segments: determine blur and opacity based on relative distance
+    let blurFilterAttr = '';
+    let opacity = '0.18';
+
+    if (dist > 0) {
+      // Lines below active (Upcoming lyrics)
+      if (dist === 1) {
+        blurFilterAttr = 'filter="url(#spotBlurNext1)"';
+        opacity = '0.55';
+      } else if (dist === 2) {
+        blurFilterAttr = 'filter="url(#spotBlurNext2)"';
+        opacity = '0.32';
+      } else {
+        blurFilterAttr = 'filter="url(#spotBlurNext3)"';
+        opacity = '0.16';
+      }
+    } else {
+      // Lines above active (Past lyrics)
+      if (dist === -1) {
+        blurFilterAttr = 'filter="url(#spotBlurPast1)"';
+        opacity = '0.42';
+      } else {
+        blurFilterAttr = 'filter="url(#spotBlurPast2)"';
+        opacity = '0.20';
+      }
+    }
+
     const linesText = seg.wrappedLines.map((lineWords, lIdx) => {
       const lineStr = lineWords.map((w) => w.text).join(' ');
       const dy = lIdx === 0 ? 0 : 30;
@@ -371,7 +433,7 @@ export function renderSpotifyGlowSvg({
     }).join('');
 
     return `
-      <text x="54" y="${segY + 26}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="22px" font-weight="700" fill="#ffffff" opacity="${opacity}">
+      <text x="54" y="${segY + 26}" xml:space="preserve" font-family="system-ui, -apple-system, sans-serif" font-size="22px" font-weight="700" fill="#ffffff" opacity="${opacity}" ${blurFilterAttr}>
         ${linesText}
       </text>
     `;
@@ -402,6 +464,23 @@ export function renderSpotifyGlowSvg({
         </feMerge>
       </filter>
 
+      <!-- Depth-of-Field Blur Filters for Upcoming and Past Lyrics -->
+      <filter id="spotBlurPast1" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" />
+      </filter>
+      <filter id="spotBlurPast2" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2.8" />
+      </filter>
+      <filter id="spotBlurNext1" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="1.6" />
+      </filter>
+      <filter id="spotBlurNext2" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3.6" />
+      </filter>
+      <filter id="spotBlurNext3" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="5.8" />
+      </filter>
+
       <!-- Lyrics Fade Mask for Cinematic Top and Bottom Dissolve -->
       <linearGradient id="fadeGrad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#ffffff" stop-opacity="0" />
@@ -423,7 +502,7 @@ export function renderSpotifyGlowSvg({
     <rect width="100%" height="100%" fill="url(#spotBg)" />
     <rect width="100%" height="100%" fill="url(#spotAmbient)" />
 
-    <!-- Masked Fluid Lyrics Stream -->
+    <!-- Masked Fluid Lyrics Stream with Depth of Field -->
     <g mask="url(#lyricsMask)">
       ${lyricsElements}
     </g>
@@ -458,7 +537,7 @@ export function renderSpotifyGlowSvg({
     <!-- Footer Progress Bar Track & Filled Line -->
     <rect x="54" y="${footerY}" width="${width - 108}" height="4" rx="2" fill="rgba(255, 255, 255, 0.12)" />
     <rect x="54" y="${footerY}" width="${progressW}" height="4" rx="2" fill="${theme.glowColor}" />
-    <circle cx="${54 + progressW}" cy="${footerY + 2}" r="4" fill="#ffffff" filter="url(#spotGlow)" />
+    <circle cx="${54 + progressW}" cy="${footerY + 2}" r="4.5" fill="#ffffff" filter="url(#spotGlow)" />
 
     <!-- Footer Labels -->
     <text x="54" y="${badgeY}" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="11px" fill="${theme.glowColor}" letter-spacing="2">SPOTIFY GLOW</text>
@@ -483,7 +562,7 @@ export async function generateSpotifyGlowVideoMp4({
   syncOffset = 0,
   isCustomOffset = false,
 } = {}) {
-  const FPS = 25;
+  const FPS = 30;
   const width = isStory ? 540 : 720;
   const height = isStory ? 960 : 720;
 
@@ -603,9 +682,13 @@ export async function generateSpotifyGlowVideoMp4({
     // Precalculate segment words, layouts, and camera scroll targets
     const { preparedSegments, cumulativeY, idealScrollY } = prepareSegments(activeSegments, isStory);
 
-    const totalFrames = Math.max(25, Math.round(windowDuration * FPS));
-    let currentSegIdx = 0;
+    const totalFrames = Math.max(30, Math.round(windowDuration * FPS));
+    let scrollTargetIdx = 0;
+    let vocalSegIdx = 0;
     let currentScrollY = idealScrollY[0];
+
+    // Scroll anticipation lead (camera begins gliding 0.28s before next line starts)
+    const SCROLL_LEAD = 0.28;
 
     // Frame batch processing for optimal memory and CPU performance
     const BATCH_SIZE = 12;
@@ -617,17 +700,25 @@ export async function generateSpotifyGlowVideoMp4({
       for (let bf = f; bf < batchEnd; bf++) {
         const frameTime = activeSegments[0].time + (bf / FPS);
 
-        // Find current active segment
+        // Advance scroll target index with smooth anticipation
         while (
-          currentSegIdx < preparedSegments.length - 1 &&
-          frameTime >= preparedSegments[currentSegIdx + 1].time
+          scrollTargetIdx < preparedSegments.length - 1 &&
+          frameTime >= preparedSegments[scrollTargetIdx + 1].time - SCROLL_LEAD
         ) {
-          currentSegIdx++;
+          scrollTargetIdx++;
         }
 
-        const targetScrollY = idealScrollY[currentSegIdx];
+        // Advance active vocal index when vocal articulation begins
+        while (
+          vocalSegIdx < preparedSegments.length - 1 &&
+          frameTime >= preparedSegments[vocalSegIdx + 1].time - 0.05
+        ) {
+          vocalSegIdx++;
+        }
+
+        const targetScrollY = idealScrollY[scrollTargetIdx];
         // Physical exponential smoothing for kinetic vertical scroll (critically damped)
-        currentScrollY += (targetScrollY - currentScrollY) * 0.16;
+        currentScrollY += (targetScrollY - currentScrollY) * 0.12;
 
         const svg = renderSpotifyGlowSvg({
           trackName: lyricsData.trackName || 'Unknown Track',
@@ -635,7 +726,7 @@ export async function generateSpotifyGlowVideoMp4({
           preparedSegments,
           cumulativeY,
           idealScrollY,
-          currentSegIdx,
+          currentSegIdx: vocalSegIdx,
           currentTime: frameTime,
           windowStartTime: activeSegments[0].time,
           windowDuration,

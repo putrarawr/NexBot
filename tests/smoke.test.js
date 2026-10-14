@@ -33,7 +33,7 @@ import {
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
 import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords, parseReffParam, findReffClusters, parseSongSearchQuery } from '../src/modules/media/index.js';
-import { renderSpotifyGlowSvg, SPOTIFY_GLOW_THEMES, prepareSegments, getSegmentWords, wrapLyricsWords } from '../src/modules/media/spotify-glow.js';
+import { renderSpotifyGlowSvg, SPOTIFY_GLOW_THEMES, prepareSegments, getSegmentWords, wrapLyricsWords, computeWordLighting } from '../src/modules/media/spotify-glow.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -498,6 +498,18 @@ async function runAllTests() {
 
     const testMockArt = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkWPjfDwAEeQHzE1F2vAAAAABJRU5ErkJggg==';
 
+    const lightBefore = computeWordLighting({ time: 10.0, duration: 1.0 }, 9.5);
+    assert.equal(lightBefore.glowAlpha, 0);
+    assert.equal(lightBefore.textAlpha, 0.32);
+
+    const lightActive = computeWordLighting({ time: 10.0, duration: 1.0 }, 10.5);
+    assert.equal(lightActive.glowAlpha, 1.0);
+    assert.equal(lightActive.textAlpha, 1.0);
+
+    const lightPast = computeWordLighting({ time: 10.0, duration: 1.0 }, 11.5);
+    assert.equal(lightPast.glowAlpha, 0);
+    assert.equal(lightPast.textAlpha, 0.95);
+
     const spotifyGlowSvg = renderSpotifyGlowSvg({
       trackName: 'Fix You',
       artistName: 'Coldplay',
@@ -516,6 +528,9 @@ async function runAllTests() {
     assert.ok(spotifyGlowSvg.includes(SPOTIFY_GLOW_THEMES.green.glowColor));
     assert.ok(spotifyGlowSvg.includes(testMockArt));
     assert.ok(spotifyGlowSvg.includes('rgb(30, 215, 96)'));
+    assert.ok(spotifyGlowSvg.includes('spotBlurNext1'));
+    assert.ok(spotifyGlowSvg.includes('spotBlurNext2'));
+    assert.ok(spotifyGlowSvg.includes('spotBlurPast1'));
   });
 
   // 4d. Group Utility & AFK Tests
