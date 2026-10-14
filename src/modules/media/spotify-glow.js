@@ -13,6 +13,7 @@ import {
   selectLrcWindow,
   parseReffParam,
   parseTimeSeconds,
+  getAudioDuration,
 } from './index.js';
 
 const execAsync = promisify(exec);
@@ -711,7 +712,17 @@ export async function generateSpotifyGlowVideoMp4({
 
     const lastSeg = activeSegments[activeSegments.length - 1];
     const rawEndTime = (lastSeg.time + (lastSeg.duration || 3.5));
-    const windowDuration = Math.min(isFull ? 300 : 35, Math.max(8, rawEndTime - activeSegments[0].time));
+    let windowDuration = Math.min(isFull ? 300 : 35, Math.max(8, rawEndTime - audioStartTime));
+
+    const audioDuration = getAudioDuration(audioPath);
+    if (audioDuration > 0) {
+      if (audioStartTime >= audioDuration) {
+        audioStartTime = Math.max(0, audioDuration - windowDuration);
+      }
+      if (audioStartTime + windowDuration > audioDuration) {
+        windowDuration = Math.max(5, audioDuration - audioStartTime);
+      }
+    }
 
     // Precalculate segment words, layouts, and camera scroll targets
     const { preparedSegments, cumulativeY, idealScrollY } = prepareSegments(activeSegments, isStory);
@@ -732,7 +743,7 @@ export async function generateSpotifyGlowVideoMp4({
       const batchEnd = Math.min(totalFrames, f + BATCH_SIZE);
 
       for (let bf = f; bf < batchEnd; bf++) {
-        const frameTime = activeSegments[0].time + (bf / FPS);
+        const frameTime = audioStartTime + (bf / FPS);
 
         // Advance scroll target index with smooth anticipation
         while (
@@ -762,7 +773,7 @@ export async function generateSpotifyGlowVideoMp4({
           idealScrollY,
           currentSegIdx: vocalSegIdx,
           currentTime: frameTime,
-          windowStartTime: activeSegments[0].time,
+          windowStartTime: audioStartTime,
           windowDuration,
           themeKey: glowTheme,
           width,
@@ -785,16 +796,24 @@ export async function generateSpotifyGlowVideoMp4({
     }
 
     const outMp4Path = path.join(tmpDir, 'output.mp4');
+    const fadeDuration = 0.8;
+    const fadeStart = Math.max(0, windowDuration - fadeDuration);
+    const fadeInDuration = 0.04;
+
     const ffmpegCmd = [
       'ffmpeg -y',
       `-framerate ${FPS}`,
       `-i "${path.join(tmpDir, 'frame_%05d.png')}"`,
+      '-accurate_seek',
       `-ss ${audioStartTime.toFixed(3)}`,
       `-t ${windowDuration.toFixed(3)}`,
       `-i "${audioPath}"`,
-      '-map 0:v -map 1:a',
+      `-filter_complex "[1:a]apad,afade=t=in:st=0:d=${fadeInDuration.toFixed(3)},afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]"`,
+      '-map 0:v -map "[aout]"',
       '-c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p',
+      `-r ${FPS}`,
       '-c:a aac -b:a 192k',
+      `-t ${windowDuration.toFixed(3)}`,
       '-movflags +faststart',
       `"${outMp4Path}"`,
     ].join(' ');
