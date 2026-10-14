@@ -2993,19 +2993,10 @@ export async function generateBratVideoMp4({
       const windowStartTime = windowInfo.startTime;
       const partLabel = windowInfo.partLabel;
 
-      const hasWordSync = Boolean(lyricsData.hasWordSync && Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.length > 0);
-      let defaultLead;
-      if (hasWordSync) {
-        // Path 1 (Word Sync Apple Music / Spotify):
-        // Lagu rap cepat: 0.13s (130ms lead / ~4 frame pada 30fps) agar visual teks mendarat tepat sebelum artikulasi vokal
-        // Lagu normal: 0.09s (90ms lead / ~2.7 frame pada 30fps)
-        defaultLead = (isFastRapSong || isRap) ? 0.13 : 0.09;
-      } else {
-        // Path 2 (LRC Standar / LRCLIB manual):
-        // Kompensasi delay refleks ketukan spasi pengetik (~150ms) + lead visual (~70ms)
-        defaultLead = (isFastRapSong || isRap) ? 0.22 : 0.16;
-      }
-      const effectiveLead = isCustomOffset ? Math.abs(syncOffset) : defaultLead;
+      // Kalibrasi visual lead presisi absolut:
+      // Lead 0.0s (atau custom offset jika ditentukan user) memastikan teks tidak mendahului artikulasi vokal
+      const defaultLead = 0.0;
+      const effectiveLead = isCustomOffset ? syncOffset : defaultLead;
 
       // Hitung audioStartTime untuk FFmpeg -ss
       let audioStartTime;
@@ -3130,9 +3121,9 @@ export async function generateBratVideoMp4({
         } else {
           const rawGapSec = rawAvailFrames / FPS;
           const isLineRapFlow = isRap || (numWords / Math.max(0.4, rawGapSec)) >= 4.5;
-          const naturalSingingDur = Math.max(0.8, Math.min(3.8, numWords * (isLineRapFlow ? 0.18 : 0.32) + 0.3));
-          const vocalDur = cur.duration && cur.duration > 0
-            ? Math.min(rawGapSec, Math.max(0.8, Math.min(cur.duration, 4.2)))
+          const naturalSingingDur = Math.max(0.8, Math.min(4.5, numWords * (isLineRapFlow ? 0.20 : 0.38) + 0.35));
+          const vocalDur = cur.duration && cur.duration > 0.6
+            ? Math.min(rawGapSec, Math.max(0.8, Math.min(cur.duration, 4.5)))
             : Math.min(rawGapSec, naturalSingingDur);
           vocalFrames = Math.max(minRequiredFrames, Math.min(rawAvailFrames, Math.round(vocalDur * FPS)));
         }
@@ -3158,42 +3149,31 @@ export async function generateBratVideoMp4({
               wordStartFrames.push(targetF);
             }
           } else {
-            const lineDur = vocalFrames / FPS;
-            const wordsPerSec = numWords / Math.max(0.4, lineDur);
-            const isLineRapFlow = isRap || wordsPerSec >= 4.5;
-
-            let baseSec;
-            if (isLineRapFlow) {
-              baseSec = 0.14;
-            } else if (wordsPerSec < 1.5) {
-              baseSec = Math.min(0.45, (lineDur * 0.55) / numWords);
-            } else {
-              baseSec = 0.25;
+            // Path 2: Distribusi durasi tiap kata secara proporsional terhadap bobot suku kata di sepanjang durasi vokal
+            const wordWeights = [];
+            for (let w = 0; w < numWords; w++) {
+              const weight = estimateWordWeight(lineLayout.positionedWords[w].word, w === numWords - 1);
+              wordWeights.push(weight);
             }
+            const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
 
-            const rawFrames = [];
-            for (let w = 0; w < numWords - 1; w++) {
-              const weight = estimateWordWeight(lineLayout.positionedWords[w].word, false);
-              rawFrames.push(Math.max(1, Math.round(weight * baseSec * FPS)));
-            }
-            const sumNonFinal = rawFrames.reduce((a, b) => a + b, 0);
-            const minLastFrames = Math.max(1, Math.round(isLineRapFlow ? 0.12 * FPS : 0.25 * FPS));
-            const maxAllowedForNonFinal = Math.max(numWords - 1, vocalFrames - minLastFrames);
-
-            if (sumNonFinal > maxAllowedForNonFinal) {
-              const scale = maxAllowedForNonFinal / sumNonFinal;
-              let allocatedSoFar = 0;
-              for (let w = 0; w < numWords - 1; w++) {
-                const scaled = Math.max(1, Math.floor(rawFrames[w] * scale));
-                rawFrames[w] = Math.min(scaled, maxAllowedForNonFinal - allocatedSoFar - (numWords - 2 - w));
-                allocatedSoFar += rawFrames[w];
+            let allocatedSoFar = 0;
+            const wordDurations = [];
+            for (let w = 0; w < numWords; w++) {
+              if (w === numWords - 1) {
+                wordDurations.push(Math.max(1, vocalFrames - allocatedSoFar));
+              } else {
+                const durF = Math.max(1, Math.round((wordWeights[w] / totalWeight) * vocalFrames));
+                const safeDurF = Math.min(durF, vocalFrames - allocatedSoFar - (numWords - 1 - w));
+                wordDurations.push(safeDurF);
+                allocatedSoFar += safeDurF;
               }
             }
 
             wordStartFrames = [currentLineStartFrame];
             let accumF = currentLineStartFrame;
             for (let w = 0; w < numWords - 1; w++) {
-              accumF += rawFrames[w];
+              accumF += wordDurations[w];
               wordStartFrames.push(accumF);
             }
           }

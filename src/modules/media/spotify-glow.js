@@ -139,9 +139,11 @@ export function getSegmentWords(seg, nextSegTime) {
   if (rawWords.length === 0) return [];
   const lineStart = seg.time;
   const rawGap = nextSegTime ? Math.max(0.6, nextSegTime - lineStart) : (seg.duration || 3.0);
-  // Alokasi durasi vokal alami (tempo bernyanyi normal ~0.30s - 0.38s per kata) agar lirik tidak delay
-  const estimatedVocalDur = Math.max(0.9, Math.min(4.2, rawWords.length * 0.34 + 0.35));
-  const totalDuration = Math.min(estimatedVocalDur, Math.max(0.8, rawGap - 0.25));
+  const naturalSingingDur = Math.max(0.9, Math.min(4.5, rawWords.length * 0.38 + 0.30));
+  const vocalDuration = (seg.duration && seg.duration > 0.6)
+    ? Math.min(rawGap - 0.2, Math.max(0.9, seg.duration))
+    : Math.min(rawGap - 0.2, naturalSingingDur);
+  const totalDuration = Math.max(0.8, vocalDuration);
 
   const totalChars = rawWords.reduce((acc, w) => acc + Math.max(2, w.length), 0);
   let curTime = lineStart;
@@ -254,8 +256,8 @@ export function computeWordLighting(w, currentTime) {
   const start = w.time;
   const end = w.time + Math.max(0.18, w.duration || 0.38);
 
-  // 1. Sebelum kata dimulai (lebih dari 0.12s sebelum mulai)
-  if (currentTime < start - 0.12) {
+  // 1. Sebelum kata dimulai (tepat sebelum vokal mulai: < start - 0.02s)
+  if (currentTime < start - 0.02) {
     return {
       glowAlpha: 0,
       textAlpha: 0.32,
@@ -263,20 +265,19 @@ export function computeWordLighting(w, currentTime) {
     };
   }
 
-  // 2. Fase attack / mekar halus (dari start - 0.12s hingga start + 0.12s)
-  if (currentTime < start + 0.12) {
-    const t = Math.max(0, Math.min(1, (currentTime - (start - 0.12)) / 0.24));
-    // Smooth cubic ease-in
+  // 2. Fase attack / mekar responsif (dari start - 0.02s hingga start + 0.06s)
+  if (currentTime < start + 0.06) {
+    const t = Math.max(0, Math.min(1, (currentTime - (start - 0.02)) / 0.08));
     const easeIn = t * t * (3 - 2 * t);
     return {
-      glowAlpha: easeIn * 0.96,
+      glowAlpha: easeIn * 0.98,
       textAlpha: 0.32 + 0.68 * easeIn,
       isCurrent: true,
     };
   }
 
   // 3. Fase artikulasi stabil (saat vokal kata sedang dinyanyikan)
-  if (currentTime < end - 0.08) {
+  if (currentTime < end - 0.04) {
     return {
       glowAlpha: 1.0,
       textAlpha: 1.0,
@@ -284,9 +285,9 @@ export function computeWordLighting(w, currentTime) {
     };
   }
 
-  // 4. Fase decay / crossfade halus ke kata berikutnya (dari end - 0.08s hingga end + 0.24s)
-  if (currentTime < end + 0.24) {
-    const t = Math.max(0, Math.min(1, (currentTime - (end - 0.08)) / 0.32));
+  // 4. Fase decay / crossfade halus ke kata berikutnya (dari end - 0.04s hingga end + 0.14s)
+  if (currentTime < end + 0.14) {
+    const t = Math.max(0, Math.min(1, (currentTime - (end - 0.04)) / 0.18));
     const easeOut = 1 - Math.pow(t, 2);
     return {
       glowAlpha: easeOut * 0.80,
@@ -702,8 +703,8 @@ export async function generateSpotifyGlowVideoMp4({
       throw new Error('Tidak ada segmen lirik yang dapat ditampilkan.');
     }
 
-    const defaultLead = lyricsData.hasWordSync ? 0.08 : 0.16;
-    const effectiveLead = isCustomOffset ? Math.abs(syncOffset) : defaultLead;
+    const defaultLead = 0.0;
+    const effectiveLead = isCustomOffset ? syncOffset : defaultLead;
 
     let audioStartTime;
     if (windowStartTime === 0 && (isFull || isIntro || activeSegments[0].time <= 5.0)) {
@@ -734,8 +735,8 @@ export async function generateSpotifyGlowVideoMp4({
     let vocalSegIdx = 0;
     let currentScrollY = idealScrollY[0];
 
-    // Scroll anticipation lead (camera begins gliding 0.28s before next line starts)
-    const SCROLL_LEAD = 0.28;
+    // Scroll anticipation lead (camera begins gliding 0.22s before next line starts)
+    const SCROLL_LEAD = 0.22;
 
     // Frame batch processing for optimal memory and CPU performance
     const BATCH_SIZE = 12;
@@ -758,7 +759,7 @@ export async function generateSpotifyGlowVideoMp4({
         // Advance active vocal index when vocal articulation begins
         while (
           vocalSegIdx < preparedSegments.length - 1 &&
-          frameTime >= preparedSegments[vocalSegIdx + 1].time - 0.05
+          frameTime >= preparedSegments[vocalSegIdx + 1].time
         ) {
           vocalSegIdx++;
         }
