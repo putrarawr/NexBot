@@ -1353,7 +1353,8 @@ function renderBratSvg(
   activeDy = 0,
   overrideBg = null,
   overrideTextColor = null,
-  blurStdDev = 0.9
+  blurStdDev = 0.9,
+  activeScale = 1.0
 ) {
   const bg = overrideBg || layout.bg;
   const textColor = overrideTextColor || (bg === '#000000' || bg === '#0a0a0a' ? '#ffffff' : layout.textColor);
@@ -1362,7 +1363,8 @@ function renderBratSvg(
     const op = isNewest ? activeOpacity : 1.0;
     const dy = isNewest ? activeDy : 0;
     const yPos = parseFloat(pw.y) + dy;
-    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${layout.fontSize}px" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
+    const fSize = isNewest && activeScale !== 1.0 ? `${(layout.fontSize * activeScale).toFixed(1)}px` : `${layout.fontSize}px`;
+    return `<text x="${pw.x}" y="${yPos.toFixed(2)}" text-anchor="${pw.anchor}" font-family="Arial Narrow, Arial, Liberation Sans Narrow, sans-serif" font-size="${fSize}" fill="${textColor}" opacity="${op.toFixed(2)}" filter="url(#bratBlur)">${escapeXml(pw.word)}</text>`;
   });
 
   return `
@@ -2473,7 +2475,7 @@ export async function generateBratVideoMp4({
             }
           }
 
-          // Solid Frame Renderer: kata tampil tegas di frame yang tepat tanpa jeda/ghosting blur
+          // Micro-Pop Frame Renderer: 1 frame hentakan beat punch (33ms) + solid resting state
           let stepIdx = 0;
           while (stepIdx < numWords) {
             const currentF = wordStartFrames[stepIdx];
@@ -2490,19 +2492,57 @@ export async function generateBratVideoMp4({
             durationFrames = Math.max(1, durationFrames);
 
             const visible = lineLayout.positionedWords.slice(0, nextStepIdx);
-            const solidSvg = renderBratSvg(
-              lineLayout,
-              visible,
-              nextStepIdx - 1,
-              1.0,
-              0.0,
-              curTheme.bg,
-              curTheme.textColor,
-              0.9
-            );
-            const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
-            await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-            pushFrame(solidPath, durationFrames);
+            const activeIdx = nextStepIdx - 1;
+
+            if (durationFrames >= 2) {
+              // Frame 1: Micro-Pop Beat Punch (1 frame = 33ms) untuk hentakan dinamis pada ketukan vokal
+              const popSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                -1.2,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.06
+              );
+              const popPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_pop.png`);
+              await sharp(Buffer.from(popSvg)).png().toFile(popPath);
+              pushFrame(popPath, 1);
+
+              // Sisa frame: Tampilan solid resting state yang stabil dan tajam
+              const solidSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.0
+              );
+              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
+              pushFrame(solidPath, durationFrames - 1);
+            } else {
+              // Jika hanya 1 frame (kata super cepat): langsung tampilkan solid state tanpa pop ganda
+              const solidSvg = renderBratSvg(
+                lineLayout,
+                visible,
+                activeIdx,
+                1.0,
+                0.0,
+                curTheme.bg,
+                curTheme.textColor,
+                0.9,
+                1.0
+              );
+              const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
+              await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
+              pushFrame(solidPath, 1);
+            }
 
             stepIdx = nextStepIdx;
           }
