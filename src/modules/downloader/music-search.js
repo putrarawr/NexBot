@@ -140,6 +140,37 @@ async function safeUnlink(...filePaths) {
   }
 }
 
+function getCookieArgs() {
+  if (process.env.YT_COOKIES || process.env.YOUTUBE_COOKIES) {
+    const raw = (process.env.YT_COOKIES || process.env.YOUTUBE_COOKIES).trim();
+    if (raw) {
+      const cookiePath = path.join(os.tmpdir(), 'yt_cookies.txt');
+      try {
+        fs.writeFileSync(cookiePath, raw, 'utf8');
+        return `--cookies ${shellQuote(cookiePath)} `;
+      } catch {}
+    }
+  }
+  const candidateFiles = [
+    path.join(process.cwd(), 'cookies.txt'),
+    path.join(process.cwd(), 'data', 'cookies.txt'),
+  ];
+  for (const cf of candidateFiles) {
+    if (fs.existsSync(cf)) {
+      return `--cookies ${shellQuote(cf)} `;
+    }
+  }
+  return '';
+}
+
+function getProxyArgs() {
+  const proxy = process.env.YT_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
+  if (proxy && proxy.trim()) {
+    return `--proxy ${shellQuote(proxy.trim())} `;
+  }
+  return '';
+}
+
 export async function downloadMusicTrack(target, metadata = {}) {
   let searchTerm = String(target || '').replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
   if (metadata.title) metadata.title = String(metadata.title).replace(/\0/g, ' ').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
@@ -186,7 +217,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
       const cleanTerm = searchTerm.replace(/^(ytsearch\d*:|scsearch\d*:)/i, '').replace(/\baudio\b/gi, '').trim();
       const searchTargetCand = `ytsearch10:${cleanTerm} audio`;
       const printTemplate = '%(id)s\t%(duration)s\t%(title)s\t%(channel)s';
-      const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings --extractor-args "youtube:player_client=android_creator,android,ios,web" ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
+      const candCmd = `yt-dlp ${getCookieArgs()}${getProxyArgs()}--flat-playlist --skip-download --no-warnings --extractor-args "youtube:player_client=android_creator,android,ios,web" ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
       const { stdout: candOut } = await execAsync(candCmd, { timeout: 20000 });
       const candLines = candOut.split(/\r?\n/).filter(Boolean);
       let bestId = null;
@@ -265,7 +296,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
     : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} official audio`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b/best" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
   const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android_creator,android,ios,web" ';
-  const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
+  const cmd = `yt-dlp ${getCookieArgs()}${getProxyArgs()}${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
 
   try {
     await execAsync(cmd, { timeout: 55000 });
@@ -277,14 +308,14 @@ export async function downloadMusicTrack(target, metadata = {}) {
       .replace(/\s*[\(\[](?:feat|ft|with|prod|remaster|version|refix|remix|edit|mix)\b.*?[\]\)]/gi, '')
       .replace(/^https?:\/\/[^\s]+/i, '')
       .trim() || cleanTerm;
-    const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} official audio`)}`;
+    const fallbackCmd = `yt-dlp ${getCookieArgs()}${getProxyArgs()}${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} official audio`)}`;
     let youtubeOk = false;
     try {
       await execAsync(fallbackCmd, { timeout: 45000 });
       youtubeOk = true;
     } catch {
       try {
-        const rawYtCmd = `yt-dlp ${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} audio`)}`;
+        const rawYtCmd = `yt-dlp ${getCookieArgs()}${getProxyArgs()}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} audio`)}`;
         await execAsync(rawYtCmd, { timeout: 40000 });
         youtubeOk = true;
       } catch {}
@@ -296,7 +327,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
       if (metadata.targetDuration && Number(metadata.targetDuration) >= 60) {
         try {
           const safeDur = Number(metadata.targetDuration);
-          const scCandCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(`scsearch5:${cleanFallback}`)} --print "%(url)s\t%(duration)s\t%(title)s"`;
+          const scCandCmd = `yt-dlp ${getProxyArgs()}--flat-playlist --skip-download --no-warnings ${shellQuote(`scsearch5:${cleanFallback}`)} --print "%(url)s\t%(duration)s\t%(title)s"`;
           const { stdout: scOut } = await execAsync(scCandCmd, { timeout: 15000 });
           const scLines = scOut.split(/\r?\n/).filter(Boolean);
           let bestScUrl = null;
@@ -319,7 +350,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
         } catch {}
       }
 
-      const scCmd = `yt-dlp --no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(scTarget)}`;
+      const scCmd = `yt-dlp ${getProxyArgs()}--no-warnings --no-playlist --playlist-items 1 -f "ba/b" -x --audio-format mp3 --audio-quality 4 -o "${outTemplate}" ${shellQuote(scTarget)}`;
       try {
         await execAsync(scCmd, { timeout: 30000 });
       } catch (scErr) {
