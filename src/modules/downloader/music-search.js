@@ -185,43 +185,61 @@ export async function downloadMusicTrack(target, metadata = {}) {
       const safeDuration = Number(metadata.targetDuration);
       const cleanTerm = searchTerm.replace(/^(ytsearch\d*:|scsearch\d*:)/i, '').replace(/\baudio\b/gi, '').trim();
       const searchTargetCand = `ytsearch10:${cleanTerm} audio`;
-      const printTemplate = '%(id)s\t%(duration)s\t%(title)s';
+      const printTemplate = '%(id)s\t%(duration)s\t%(title)s\t%(channel)s';
       const candCmd = `yt-dlp --flat-playlist --skip-download --no-warnings ${shellQuote(searchTargetCand)} --print ${shellQuote(printTemplate)}`;
       const { stdout: candOut } = await execAsync(candCmd, { timeout: 20000 });
       const candLines = candOut.split(/\r?\n/).filter(Boolean);
       let bestId = null;
       let highestScore = -Infinity;
 
-      const unwantedRegex = /\b(instrumental|karaoke|backing track|beat only|off vocal|minus one|no vocal|violin|piano|guitar|remake|reprod)\b/i;
-      const userWantsInstrumental = unwantedRegex.test(cleanTerm);
+      const unwantedRegex = /\b(instrumental|karaoke|backing track|beat only|off vocal|minus one|no vocal|violin|piano cover|guitar cover|remake|reprod|sped up|slowed|reverb|8d audio|nightcore|live|concert|parody|parodi|remix|dj)\b/i;
+      const userWantsSpecial = unwantedRegex.test(cleanTerm);
 
       for (const line of candLines) {
         const parts = line.split('\t');
         const id = parts[0];
         const durStr = parts[1];
         const title = parts[2] || '';
+        const channel = parts[3] || '';
         const d = parseFloat(durStr);
         if (id && !isNaN(d) && d > 0) {
           // Abaikan video pendek jika lagu aslinya berdurasi panjang
           if (safeDuration >= 60 && d < 45) continue;
 
           // Abaikan versi instrumental/karaoke jika pengguna tidak memintanya
-          if (!userWantsInstrumental && unwantedRegex.test(title)) {
+          if (!userWantsSpecial && unwantedRegex.test(title)) {
             continue;
           }
 
           let score = 50;
           const diff = Math.abs(d - safeDuration);
-          if (diff <= 3) score += 45;
-          else if (diff <= 10) score += 25;
-          else if (diff <= 30) score += 10;
-          else if (diff > 45) score -= 40;
 
-          if (/official audio/i.test(title)) score += 35;
-          else if (/official (video|music video)/i.test(title)) score += (diff > 15 ? -25 : 15);
-          else if (/\baudio\b/i.test(title)) score += 20;
-          if (metadata.artist && new RegExp(metadata.artist.replace(/[^a-z0-9]/gi, ''), 'i').test(title.replace(/[^a-z0-9]/gi, ''))) {
-            score += 20;
+          // Presisi durasi sangat penting agar intro audio persis sama dengan timestamp lirik studio
+          if (diff <= 1.5) score += 60;
+          else if (diff <= 3.0) score += 45;
+          else if (diff <= 6.0) score += 20;
+          else if (diff <= 12.0) score -= 10;
+          else score -= 55;
+
+          // Prioritaskan channel resmi YouTube Music (- Topic) & Official Audio
+          if (/- topic$/i.test(channel.trim())) {
+            score += 50;
+          }
+          if (/official audio|official lyric|lyric video|audio/i.test(title)) {
+            score += 35;
+          }
+
+          // Beri penalti pada Official Music Video (MV) karena hampir selalu memiliki intro cerita/skit/hening
+          if (/official (music )?video|\bm\/?v\b|video klip|music video/i.test(title)) {
+            score -= (diff <= 2.0 ? 15 : 50);
+          }
+
+          if (metadata.artist) {
+            const normArtist = metadata.artist.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            const normTitleChan = `${title} ${channel}`.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            if (normArtist && normTitleChan.includes(normArtist)) {
+              score += 25;
+            }
           }
 
           if (score > highestScore) {
@@ -243,7 +261,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
   const resolvedSearchPrefixed = /^(https?:\/\/|ytsearch\d*:|scsearch\d*:)/i.test(searchTerm);
   const searchTarget = resolvedSearchPrefixed
     ? searchTerm
-    : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} audio`;
+    : `ytsearch1:${searchTerm.replace(/\baudio\s*$/i, '').trim()} official audio`;
   const baseArgs = `--no-warnings --no-playlist --playlist-items 1 -f "ba[ext=m4a]/ba[ext=mp3]/ba/b" -x --audio-format mp3 --audio-quality 4 --max-filesize 45M -o "${outTemplate}"`;
   const directArgs = '--js-runtimes node --extractor-args "youtube:player_client=android,web" ';
   const cmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(searchTarget)}`;
@@ -258,7 +276,7 @@ export async function downloadMusicTrack(target, metadata = {}) {
       .replace(/\s*[\(\[](?:feat|ft|with|prod|remaster|version|refix|remix|edit|mix)\b.*?[\]\)]/gi, '')
       .replace(/^https?:\/\/[^\s]+/i, '')
       .trim() || cleanTerm;
-    const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback}`)}`;
+    const fallbackCmd = `yt-dlp ${directArgs}${baseArgs} ${shellQuote(`ytsearch1:${cleanFallback} official audio`)}`;
     try {
       await execAsync(fallbackCmd, { timeout: 45000 });
     } catch (fallbackErr) {

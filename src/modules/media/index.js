@@ -890,7 +890,7 @@ export function registerMediaCommands() {
         if (!isSongMode && !isExplicitText && !quotedAudio && cleanedText) {
           try {
             const detectedLyrics = await fetchSongLyricsWithSync(cleanedText);
-            if (detectedLyrics?.syncedLyrics) {
+            if (detectedLyrics && (detectedLyrics.syncedLyrics || detectedLyrics.plainLyrics)) {
               isSongMode = true;
               lyricsData = detectedLyrics;
             }
@@ -1428,31 +1428,57 @@ export function getAudioDuration(audioPath) {
   }
 }
 
-export function groupSyllablesToWords(syllabus) {
+export function groupSyllablesToWords(syllabus, lineText = '') {
   if (!Array.isArray(syllabus) || syllabus.length === 0) return [];
   const words = [];
+  const targetWords = (lineText || '').trim().split(/\s+/).filter(Boolean);
+  const cleanTargetWords = targetWords.map((w) => w.toLowerCase().replace(/['’`‘]/g, '').replace(/[^a-z0-9]/g, ''));
+
   let curWord = '';
   let curStart = null;
   let curDuration = 0;
+  let targetIdx = 0;
 
   for (let i = 0; i < syllabus.length; i++) {
     const s = syllabus[i];
     if (curStart === null) curStart = s.time;
     curWord += s.text;
-    curDuration += s.duration || 0;
+    curDuration += (s.duration || 0);
 
-    if (s.text.endsWith(' ') || s.text.endsWith('\t') || i === syllabus.length - 1) {
-      const cleanWord = curWord.trim();
-      if (cleanWord) {
+    const cleanAccum = curWord.toLowerCase().replace(/['’`‘]/g, '').replace(/[^a-z0-9]/g, '');
+    const cleanTarget = cleanTargetWords[targetIdx] || '';
+
+    const hasTrailingSpace = /\s+$/.test(s.text);
+    const nextHasLeadingSpace = (i + 1 < syllabus.length) && /^\s+/.test(syllabus[i + 1].text);
+    const targetMatched = cleanTarget && cleanAccum.length >= cleanTarget.length;
+    const isLastSyllable = (i === syllabus.length - 1);
+
+    if (targetMatched || hasTrailingSpace || nextHasLeadingSpace || isLastSyllable) {
+      const displayWord = targetWords[targetIdx] || curWord.trim();
+      if (displayWord) {
         words.push({
-          word: cleanWord,
+          word: displayWord,
           time: curStart / 1000,
           duration: curDuration / 1000,
         });
+        targetIdx++;
       }
       curWord = '';
       curStart = null;
       curDuration = 0;
+    }
+  }
+
+  // Handle sisa targetWords jika syllabus lebih sedikit dari baris teks
+  if (words.length > 0 && targetIdx < targetWords.length) {
+    const lastTime = words[words.length - 1].time;
+    while (targetIdx < targetWords.length) {
+      words.push({
+        word: targetWords[targetIdx],
+        time: lastTime + (targetIdx - words.length + 1) * 0.15,
+        duration: 0.15,
+      });
+      targetIdx++;
     }
   }
 
@@ -1524,7 +1550,13 @@ export function hasNonFeatSubtitle(rawTrack) {
 }
 
 export function normalizeFuzzy(str) {
-  return String(str || '').toLowerCase().replace(/!/g, 'i').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(str || '')
+    .toLowerCase()
+    .replace(/!/g, 'i')
+    .replace(/['’`‘]/g, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export async function fetchSongLyricsWithSync(query) {
@@ -1597,9 +1629,12 @@ export async function fetchSongLyricsWithSync(query) {
           score -= 75;
         }
 
-        // Jika query 3+ kata dan artistMatches 0, beri penalti agar artis lain tidak menang
-        if (searchTokens.length >= 3 && artistMatches === 0) {
+        // Jika user sengaja menulis "Judul - Artis", pastikan keduanya ada kecocokan.
+        // Jangan beri penalti jika user hanya mencari judul panjang tanpa nama artis (misal: "kita ke sana", "birds of a feather").
+        if ((userCand1 || userCand2) && artistMatches === 0) {
           score -= 60;
+        } else if (searchTokens.length >= 3 && artistMatches === 0 && trackMatches < 2) {
+          score -= 40;
         }
 
         if (userCand1) {
@@ -1672,7 +1707,7 @@ export async function fetchSongLyricsWithSync(query) {
               time: l.time / 1000,
               duration: (l.duration || 0) / 1000,
               text: rawText,
-              words: groupSyllablesToWords(l.syllabus),
+              words: groupSyllablesToWords(l.syllabus, rawText),
             };
           })
           .filter((s) => s.text && s.text.length > 0 && !/^\[.*?\]$/.test(s.text));
@@ -1845,11 +1880,17 @@ export async function fetchSongLyricsWithSync(query) {
         if (normItemArtist.includes(tok)) score += 15;
       }
 
+      // Utamakan secara kuat entri yang memiliki syncedLyrics dibanding plainLyrics
+      if (item.syncedLyrics) {
+        score += 65;
+      }
+
       return { item, score };
     });
 
     scored.sort((a, b) => b.score - a.score);
-    const match = scored.find((s) => s.item && (s.item.syncedLyrics || s.item.plainLyrics))?.item;
+    const matchSynced = scored.find((s) => s.item && s.item.syncedLyrics)?.item;
+    const match = matchSynced || scored.find((s) => s.item && (s.item.syncedLyrics || s.item.plainLyrics))?.item;
     if (match) {
       return {
         trackName: match.trackName || canonicalTrack,
@@ -1868,6 +1909,23 @@ export async function fetchSongLyricsWithSync(query) {
   }
 
   return null;
+}
+
+export function buildSyntheticLrcFromPlain(plainLyrics, duration = 0) {
+  if (!plainLyrics || typeof plainLyrics !== 'string') return '';
+  const lines = plainLyrics.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0 && !/^\[.*?\]$/.test(l));
+  if (lines.length === 0) return '';
+  const totalDur = (duration && duration > 20) ? duration : lines.length * 3.5;
+  const introTime = Math.min(10, Math.max(3, totalDur * 0.08));
+  const availableDur = Math.max(10, totalDur - introTime - 5);
+  const timePerLine = availableDur / lines.length;
+
+  return lines.map((line, idx) => {
+    const t = introTime + idx * timePerLine;
+    const m = Math.floor(t / 60);
+    const s = (t % 60).toFixed(2);
+    return `[${String(m).padStart(2, '0')}:${String(s).padStart(5, '0')}] ${line}`;
+  }).join('\n');
 }
 
 export function parseLrcLyrics(lrcString, offset = 0) {
@@ -2181,6 +2239,8 @@ export async function generateBratVideoMp4({
   syncOffset = 0,
   isCustomOffset = false,
 } = {}) {
+  const FPS = 30;
+
   // Mode 1: Lagu dengan lirik sinkron otomatis
   if (songQuery || initialLyricsData) {
     const cleanQuery = (songQuery || '').trim();
@@ -2192,15 +2252,14 @@ export async function generateBratVideoMp4({
     let segments;
     if (lyricsData.hasWordSync && Array.isArray(lyricsData.wordSegments) && lyricsData.wordSegments.length > 0) {
       // Offset kata:
-      // Jika pengguna menentukan offset kustom (-offset), gunakan nilai pengguna.
-      // Default lead offset:
-      // - Lagu normal: -0.06s untuk menyesuaikan artikulasi konsonan vokal alami agar tidak delay.
-      // - Rap cepat: -0.02s agar lirik cepat tidak mendahului suku kata.
+      // Lead offset presisi untuk mengkompensasi artikulasi vokal dan persepsi visual:
+      // - Lagu normal: -0.08s
+      // - Rap cepat: -0.05s
       segments = lyricsData.wordSegments.map((ws) => {
         const lineDur = ws.duration || 1.0;
         const lineWords = ws.words?.length || (ws.text || '').trim().split(/\s+/).filter(Boolean).length;
-        const isLineFast = (lineWords / Math.max(0.4, lineDur)) >= 4.5;
-        const defaultLead = (isRap || isLineFast) ? -0.02 : -0.06;
+        const isLineFast = (lineWords / Math.max(0.35, lineDur)) >= 4.2;
+        const defaultLead = (isRap || isLineFast) ? -0.05 : -0.08;
         const lineOffset = isCustomOffset ? syncOffset : defaultLead;
 
         return {
@@ -2213,14 +2272,15 @@ export async function generateBratVideoMp4({
         };
       });
     } else {
-      if (!lyricsData.syncedLyrics) {
+      const syncedStr = lyricsData.syncedLyrics || buildSyntheticLrcFromPlain(lyricsData.plainLyrics, lyricsData.duration);
+      if (!syncedStr) {
         throw new Error(`Lirik tersinkronisasi (timestamp audio) belum tersedia untuk lagu "${lyricsData.trackName} - ${lyricsData.artistName}".`);
       }
-      // Fallback LRC: LRCLIB ditandai secara manual dengan latensi reaksi pengetik ~100-150ms.
-      // Berikan default lead offset -0.10s untuk lagu normal, -0.05s untuk rap agar vokal dan lirik pas.
-      const defaultLrcOffset = isRap ? -0.05 : -0.10;
+      // Fallback LRC: LRCLIB ditandai secara manual dengan latensi reaksi pengetik ~100-200ms.
+      // Berikan default lead offset -0.14s untuk lagu normal, -0.10s untuk rap agar vokal dan lirik pas.
+      const defaultLrcOffset = isRap ? -0.10 : -0.14;
       const effectiveLrcOffset = isCustomOffset ? syncOffset : defaultLrcOffset;
-      segments = parseLrcLyrics(lyricsData.syncedLyrics, effectiveLrcOffset);
+      segments = parseLrcLyrics(syncedStr, effectiveLrcOffset);
     }
 
     if (segments.length === 0) {
@@ -2299,7 +2359,7 @@ export async function generateBratVideoMp4({
       // Jika ada jeda instrumental di awal (misal isFull atau -intro), tampilkan frame bersih sebelum vokal pertama masuk
       const introDuration = activeSegments[0].time - startTime;
       if (introDuration > 0.05) {
-        const introFrames = Math.max(1, Math.round(introDuration * 24));
+        const introFrames = Math.max(1, Math.round(introDuration * FPS));
         const firstLineText = activeSegments[0].text + (theme ? ` ${theme}` : '');
         const firstLayout = computeBratLayout(firstLineText);
         const cleanIntroSvg = `
@@ -2323,10 +2383,10 @@ export async function generateBratVideoMp4({
         const currentLineStartFrame = globalFrameCount;
         let nextLineStartFrame;
         if (next) {
-          nextLineStartFrame = Math.round((next.time - startTime) * 24);
+          nextLineStartFrame = Math.round((next.time - startTime) * FPS);
         } else {
           const lastDur = cur.duration && cur.duration > 0 ? Math.max(2.5, cur.duration + 0.6) : 3.5;
-          nextLineStartFrame = currentLineStartFrame + Math.round(lastDur * 24);
+          nextLineStartFrame = currentLineStartFrame + Math.round(lastDur * FPS);
         }
 
         const lineText = cur.text + (theme ? ` ${theme}` : '');
@@ -2340,172 +2400,105 @@ export async function generateBratVideoMp4({
 
         const hasExactWords = !isLineMode && Boolean(cur.words && cur.words.length > 0);
 
-        if (!isLineMode && numWords > 1 && totalLineFrames >= numWords) {
-          let wordFramesList = [];
+        if (!isLineMode && numWords > 1 && totalLineFrames >= 2) {
+          let wordStartFrames = [];
 
           if (hasExactWords) {
             // Path 1: Sinkronisasi presisi tinggi per nada vokal dari Apple Music / Spotify
-            const lineAvailFrames = Math.max(numWords, totalLineFrames);
-            const wordStartFrames = [currentLineStartFrame];
+            wordStartFrames = [currentLineStartFrame];
             for (let wIdx = 1; wIdx < numWords; wIdx++) {
               let targetTime;
               if (wIdx < cur.words.length) {
                 targetTime = cur.words[wIdx].time;
               } else {
                 const lastW = cur.words[cur.words.length - 1];
-                targetTime = lastW.time + (wIdx - cur.words.length + 1) * 0.15;
+                targetTime = lastW.time + (wIdx - cur.words.length + 1) * 0.12;
               }
-              const rawF = Math.round((targetTime - startTime) * 24);
-              // Untuk rap cepat, izinkan kata muncul berurutan tiap frame (minGap 1 frame = 41.6ms) tanpa jeda buatan
-              const minF = wordStartFrames[wIdx - 1] + 1;
-              const maxF = currentLineStartFrame + lineAvailFrames - (numWords - wIdx);
-              const targetF = Math.min(Math.max(minF, rawF), Math.max(minF, maxF));
+              const rawF = Math.round((targetTime - startTime) * FPS);
+              // Tidak memaksa minF = wordStartFrames[wIdx - 1] + 1; cukup >= agar kata cepat tidak terdorong ke belakang
+              const minF = wordStartFrames[wIdx - 1];
+              const maxF = currentLineStartFrame + totalLineFrames - 1;
+              const targetF = Math.min(maxF, Math.max(minF, rawF));
               wordStartFrames.push(targetF);
             }
-
-            for (let wIdx = 0; wIdx < numWords - 1; wIdx++) {
-              wordFramesList.push(Math.max(1, wordStartFrames[wIdx + 1] - wordStartFrames[wIdx]));
-            }
-            const usedSoFar = wordFramesList.reduce((a, b) => a + b, 0);
-            wordFramesList.push(Math.max(1, totalLineFrames - usedSoFar));
           } else {
             // Path 2: Alokasi cerdas bobot suku kata terhadap durasi vokal baris
-            const lineDur = totalLineFrames / 24;
+            const lineDur = totalLineFrames / FPS;
             const lineWps = numWords / Math.max(0.4, lineDur);
             const isLineRapFlow = isRap || lineWps >= 4.5;
 
-            const wordWeights = lineLayout.positionedWords.map((pw, idx) => {
-              const isLast = idx === numWords - 1;
-              return estimateWordWeight(pw.word, isLast);
-            });
-            const totalWeight = wordWeights.reduce((a, b) => a + b, 0);
-
-            let vocalFrames;
+            const wordsPerSec = numWords / Math.max(0.4, lineDur);
+            let baseSec;
             if (isLineRapFlow) {
-              // Untuk baris rap cepat (high tempo): vokal mengisi hampir seluruh baris (flow tanpa henti)
-              const pauseFrames = Math.min(2, Math.round(totalLineFrames * 0.04));
-              vocalFrames = Math.max(numWords, totalLineFrames - pauseFrames);
+              baseSec = 0.16;
+            } else if (wordsPerSec < 1.5) {
+              baseSec = Math.min(0.50, (lineDur * 0.60) / numWords);
             } else {
-              // Untuk lagu normal / balada / pop / vokal berirama:
-              // Estimasi durasi menyanyi alami berdasarkan bobot kata (~7.5 frame per bobot kata)
-              const estimatedVocal = Math.round(totalWeight * 7.5);
-              const maxPause = Math.round(totalLineFrames * 0.40);
-              const minPause = Math.min(3, Math.round(totalLineFrames * 0.08));
-              // Batasi durasi vokal agar tidak meregang berlebihan pada jeda instrumental antar baris (maks ~0.75s per kata)
-              const maxVocalCap = Math.max(numWords * 4, Math.round(numWords * 18));
-              const boundedVocal = Math.max(totalLineFrames - maxPause, Math.min(totalLineFrames - minPause, estimatedVocal));
-              vocalFrames = Math.max(numWords, Math.min(boundedVocal, maxVocalCap));
+              baseSec = 0.28;
             }
 
-            let elapsedFrames = 0;
-            for (let step = 1; step <= numWords; step++) {
-              const activeIdx = step - 1;
-              if (step === numWords) {
-                wordFramesList.push(Math.max(1, totalLineFrames - elapsedFrames));
-              } else {
-                const wf = Math.max(1, Math.round((vocalFrames * wordWeights[activeIdx]) / totalWeight));
-                const cappedWf = Math.min(wf, totalLineFrames - elapsedFrames - (numWords - step));
-                const finalWf = Math.max(1, cappedWf);
-                wordFramesList.push(finalWf);
-                elapsedFrames += finalWf;
+            const rawFrames = [];
+            for (let w = 0; w < numWords - 1; w++) {
+              const weight = estimateWordWeight(lineLayout.positionedWords[w].word, false);
+              rawFrames.push(Math.max(1, Math.round(weight * baseSec * FPS)));
+            }
+            const sumNonFinal = rawFrames.reduce((a, b) => a + b, 0);
+            const minLastFrames = Math.max(1, Math.round(isLineRapFlow ? 0.12 * FPS : 0.25 * FPS));
+            const maxAllowedForNonFinal = Math.max(numWords - 1, totalLineFrames - minLastFrames);
+
+            if (sumNonFinal > maxAllowedForNonFinal) {
+              const scale = maxAllowedForNonFinal / sumNonFinal;
+              let allocatedSoFar = 0;
+              for (let w = 0; w < numWords - 1; w++) {
+                const scaled = Math.max(1, Math.floor(rawFrames[w] * scale));
+                rawFrames[w] = Math.min(scaled, maxAllowedForNonFinal - allocatedSoFar - (numWords - 2 - w));
+                allocatedSoFar += rawFrames[w];
               }
+            }
+
+            wordStartFrames = [currentLineStartFrame];
+            let accumF = currentLineStartFrame;
+            for (let w = 0; w < numWords - 1; w++) {
+              accumF += rawFrames[w];
+              wordStartFrames.push(accumF);
             }
           }
 
-          // Render setiap kata: transisi cepat dan tegas tanpa ghosting / delay visual
-          for (let step = 1; step <= numWords; step++) {
-            const visible = lineLayout.positionedWords.slice(0, step);
-            const activeIdx = step - 1;
-            const wordFrames = wordFramesList[activeIdx];
-
-            let transitions = [];
-            if (step === 1) {
-              // Pergantian layer background: transisi warna cepat dan opacity tegas (1 frame) agar langsung terbaca jelas
-              if (prevLayerBg !== curTheme.bg && wordFrames >= 3) {
-                transitions = [
-                  { factor: 0.75, op: 0.85, dy: 0.6, blur: 0.9 },
-                ];
-              }
+          // Solid Frame Renderer: kata tampil tegas di frame yang tepat tanpa jeda/ghosting blur
+          let stepIdx = 0;
+          while (stepIdx < numWords) {
+            const currentF = wordStartFrames[stepIdx];
+            let nextStepIdx = stepIdx + 1;
+            while (nextStepIdx < numWords && wordStartFrames[nextStepIdx] === currentF) {
+              nextStepIdx++;
+            }
+            let durationFrames;
+            if (nextStepIdx < numWords) {
+              durationFrames = wordStartFrames[nextStepIdx] - currentF;
             } else {
-              // Kata berikutnya pada layer yang sama: micro-pop 1 frame pada opacity tinggi tanpa delay visual
-              if (wordFrames >= 4) {
-                transitions = [
-                  { factor: 1.0, op: 0.85, dy: 0.4, blur: 0.9 },
-                ];
-              }
+              durationFrames = (currentLineStartFrame + totalLineFrames) - currentF;
             }
+            durationFrames = Math.max(1, durationFrames);
 
-            if (transitions.length >= wordFrames) {
-              transitions = transitions.slice(0, Math.max(0, wordFrames - 1));
-            }
-
-            for (let t = 0; t < transitions.length; t++) {
-              const tr = transitions[t];
-              const frameBg = tr.factor < 1.0
-                ? interpolateHexColor(prevLayerBg, curTheme.bg, tr.factor)
-                : curTheme.bg;
-              const trSvg = renderBratSvg(
-                lineLayout,
-                visible,
-                activeIdx,
-                tr.op,
-                tr.dy,
-                frameBg,
-                curTheme.textColor,
-                tr.blur || 0.9
-              );
-              const trPath = path.join(tmpDir, `base_w${i}_${step}_tr${t}.png`);
-              await sharp(Buffer.from(trSvg)).png().toFile(trPath);
-              pushFrame(trPath, 1);
-            }
-
-            const solidFrames = Math.max(1, wordFrames - transitions.length);
+            const visible = lineLayout.positionedWords.slice(0, nextStepIdx);
             const solidSvg = renderBratSvg(
               lineLayout,
               visible,
-              activeIdx,
+              nextStepIdx - 1,
               1.0,
               0.0,
               curTheme.bg,
               curTheme.textColor,
               0.9
             );
-            const solidPath = path.join(tmpDir, `base_w${i}_${step}_solid.png`);
+            const solidPath = path.join(tmpDir, `base_w${i}_step${nextStepIdx}_solid.png`);
             await sharp(Buffer.from(solidSvg)).png().toFile(solidPath);
-            pushFrame(solidPath, solidFrames);
+            pushFrame(solidPath, durationFrames);
+
+            stepIdx = nextStepIdx;
           }
         } else {
           // Baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
-          let lineTransitions = [];
-          if (totalLineFrames >= 4 && prevLayerBg !== curTheme.bg) {
-            lineTransitions = [
-              { factor: 0.75, op: 0.85, dy: 0.6, blur: 0.9 },
-            ];
-          }
-
-          if (lineTransitions.length >= totalLineFrames) {
-            lineTransitions = lineTransitions.slice(0, Math.max(0, totalLineFrames - 1));
-          }
-
-          for (let t = 0; t < lineTransitions.length; t++) {
-            const tr = lineTransitions[t];
-            const frameBg = interpolateHexColor(prevLayerBg, curTheme.bg, tr.factor);
-            const trSvg = renderBratSvg(
-              lineLayout,
-              lineLayout.positionedWords,
-              -1,
-              tr.op,
-              tr.dy,
-              frameBg,
-              curTheme.textColor,
-              tr.blur || 0.9
-            );
-            const trPath = path.join(tmpDir, `base_line_${i}_tr${t}.png`);
-            await sharp(Buffer.from(trSvg)).png().toFile(trPath);
-            pushFrame(trPath, 1);
-          }
-
-          const solidFrames = Math.max(1, totalLineFrames - lineTransitions.length);
           const lineSvg = renderBratSvg(
             lineLayout,
             lineLayout.positionedWords,
@@ -2518,12 +2511,12 @@ export async function generateBratVideoMp4({
           );
           const linePath = path.join(tmpDir, `base_line_${i}.png`);
           await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
-          pushFrame(linePath, solidFrames);
+          pushFrame(linePath, totalLineFrames);
         }
 
         // Jika ada jeda hening/instrumental sebelum baris berikutnya, tahan teks baris ini hingga baris berikutnya mulai
         if (next) {
-          const expectedNextStart = Math.round((next.time - startTime) * 24);
+          const expectedNextStart = Math.round((next.time - startTime) * FPS);
           if (globalFrameCount < expectedNextStart) {
             const gapHoldFrames = expectedNextStart - globalFrameCount;
             const holdPath = path.join(tmpDir, `gap_hold_${i}.png`);
@@ -2554,7 +2547,7 @@ export async function generateBratVideoMp4({
       const lastLineText = lastSegment.text + (theme ? ` ${theme}` : '');
       const lastLineLayout = computeBratLayout(lastLineText);
 
-      // Smooth Fade-to-Black Dissolve (12 frame / 0.5 detik)
+      // Smooth Fade-to-Black Dissolve (12 frame / ~0.4 detik pada 30fps)
       const outroFadeFrames = 12;
       for (let f = 0; f < outroFadeFrames; f++) {
         const progress = (f + 1) / (outroFadeFrames + 1);
@@ -2577,7 +2570,7 @@ export async function generateBratVideoMp4({
         pushFrame(p, 1);
       }
 
-      // Final Blackout Tail (4 frame / ~0.17 detik layar hitam bersih penutup)
+      // Final Blackout Tail (4 frame / ~0.13 detik layar hitam bersih penutup)
       const finalBlackSvg = `
         <svg width="${lastLineLayout.canvasSize}" height="${lastLineLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg">
           <rect width="100%" height="100%" fill="#000000" />
@@ -2588,7 +2581,7 @@ export async function generateBratVideoMp4({
       pushFrame(finalBlackPath, 4);
 
       const audioDuration = getAudioDuration(audioPath);
-      const totalDuration = globalFrameCount / 24;
+      const totalDuration = globalFrameCount / FPS;
       let safeStartTime = Math.max(0, startTime);
       if (audioDuration > 0) {
         if (safeStartTime >= audioDuration) {
@@ -2605,7 +2598,7 @@ export async function generateBratVideoMp4({
       const outMp4 = path.join(tmpDir, 'output.mp4');
       const ffmpegTimeout = isFull ? 180000 : 60000;
       execSync(
-        `ffmpeg -y -framerate 24 -i "${path.join(tmpDir, 'frame_%05d.png')}" -accurate_seek -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=${fadeInDuration.toFixed(3)},afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r 24 -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
+        `ffmpeg -y -framerate ${FPS} -i "${path.join(tmpDir, 'frame_%05d.png')}" -accurate_seek -ss ${safeStartTime.toFixed(3)} -t ${totalDuration.toFixed(3)} -i "${audioPath}" -filter_complex "[1:a]apad,afade=t=in:st=0:d=${fadeInDuration.toFixed(3)},afade=t=out:st=${fadeStart.toFixed(3)}:d=${fadeDuration.toFixed(3)}[aout]" -map 0:v -map "[aout]" -c:v libx264 -pix_fmt yuv420p -r ${FPS} -c:a aac -b:a 192k -t ${totalDuration.toFixed(3)} -movflags +faststart "${outMp4}"`,
         { timeout: ffmpegTimeout }
       );
 
