@@ -2149,14 +2149,28 @@ export async function fetchSongLyricsWithSync(query) {
           })
           .filter((s) => s.text && s.text.length > 0 && !/^\[.*?\]$/.test(s.text));
 
-        if (wordSegments.length > 0) {
+        wordSegments.sort((a, b) => a.time - b.time);
+        const filteredWordSegments = [];
+        for (let i = 0; i < wordSegments.length; i++) {
+          const cur = wordSegments[i];
+          const prev = filteredWordSegments[filteredWordSegments.length - 1];
+          if (prev && Math.abs(cur.time - prev.time) < 0.25) {
+            if (cur.text.length > prev.text.length) {
+              filteredWordSegments[filteredWordSegments.length - 1] = cur;
+            }
+          } else {
+            filteredWordSegments.push(cur);
+          }
+        }
+
+        if (filteredWordSegments.length > 0) {
           const item = {
             trackName: canonicalTrack || candidate.track,
             artistName: canonicalArtist || candidate.artist || 'Unknown Artist',
             albumName: plusData.metadata?.album || '',
             duration: canonicalDuration || (plusData.metadata?.duration_ms ? plusData.metadata.duration_ms / 1000 : 0),
             hasWordSync: Boolean(plusData.hasWordSync),
-            wordSegments,
+            wordSegments: filteredWordSegments,
             syncedLyrics: wordSegments.map((s) => {
               const m = Math.floor(s.time / 60);
               const sec = (s.time % 60).toFixed(2);
@@ -2828,23 +2842,13 @@ export function selectLrcWindow(segments, {
     }
   }
 
-  const selectedFirst = segments[startIndex] || segments[0];
-  let startTime = 0;
-  if (isFull || (startIndex === 0 && isIntro)) {
-    startTime = 0;
-  } else if (startIndex === 0 && selectedFirst.time <= 5.0) {
-    startTime = 0;
-  } else {
-    startTime = Math.max(0, selectedFirst.time);
-  }
-
   let activeSegments = [];
   if (isFull) {
     activeSegments = segments.slice(startIndex);
   } else {
     for (let i = startIndex; i < segments.length; i++) {
       activeSegments.push(segments[i]);
-      if (segments[i].time - selectedFirst.time >= maxDuration) {
+      if (segments[i].time - segments[startIndex].time >= maxDuration) {
         break;
       }
     }
@@ -2859,6 +2863,16 @@ export function selectLrcWindow(segments, {
         break;
       }
     }
+  }
+
+  const selectedFirst = segments[startIndex] || segments[0];
+  let startTime = 0;
+  if (isFull || (startIndex === 0 && isIntro)) {
+    startTime = 0;
+  } else if (startIndex === 0 && selectedFirst.time <= 5.0) {
+    startTime = 0;
+  } else {
+    startTime = Math.max(0, selectedFirst.time);
   }
 
   if (activeSegments.length === 0) activeSegments.push(selectedFirst);
@@ -3041,12 +3055,57 @@ export async function generateBratVideoMp4({
 
         const curTheme = getLayerTheme(i, theme);
 
-        // Kunci frame awal dan akhir setiap baris terhadap timeline absolut audio agar bebas drift kumulatif
+        const curVisualTime = Math.max(0, cur.time - effectiveLead);
+        const expectedLineStartFrame = Math.round((curVisualTime - audioStartTime) * FPS);
+
+        // Kunci sinkronisasi frame awal baris ke timeline audio absolut
+        if (globalFrameCount < expectedLineStartFrame) {
+          const gapFrames = expectedLineStartFrame - globalFrameCount;
+          if (i === 0) {
+            const firstLineLayout = computeBratLayout(cur.text);
+            const cleanSvg = `<svg width="${firstLineLayout.canvasSize}" height="${firstLineLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="${curTheme.bg}" /></svg>`;
+            const cleanPath = path.join(tmpDir, `clean_gap_0.png`);
+            if (!fs.existsSync(cleanPath)) {
+              await sharp(Buffer.from(cleanSvg)).png().toFile(cleanPath);
+            }
+            pushFrame(cleanPath, gapFrames);
+          } else {
+            const prevSeg = activeSegments[i - 1];
+            const prevTheme = getLayerTheme(i - 1, theme);
+            const prevText = prevSeg.text + (theme ? ` ${theme}` : '');
+            const prevLayout = computeBratLayout(prevText);
+            if (gapFrames <= 75) {
+              const holdSvg = renderBratSvg(prevLayout, prevLayout.positionedWords, -1, 1.0, 0.0, prevTheme.bg, prevTheme.textColor, 0.9);
+              const holdPath = path.join(tmpDir, `gap_hold_${i - 1}.png`);
+              if (!fs.existsSync(holdPath)) {
+                await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+              }
+              pushFrame(holdPath, gapFrames);
+            } else {
+              const holdFrames = 45;
+              const cleanFrames = gapFrames - holdFrames;
+              const holdSvg = renderBratSvg(prevLayout, prevLayout.positionedWords, -1, 1.0, 0.0, prevTheme.bg, prevTheme.textColor, 0.9);
+              const holdPath = path.join(tmpDir, `gap_hold_${i - 1}.png`);
+              if (!fs.existsSync(holdPath)) {
+                await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+              }
+              pushFrame(holdPath, holdFrames);
+
+              const cleanSvg = `<svg width="${prevLayout.canvasSize}" height="${prevLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="${curTheme.bg}" /></svg>`;
+              const cleanPath = path.join(tmpDir, `clean_break_${i}.png`);
+              if (!fs.existsSync(cleanPath)) {
+                await sharp(Buffer.from(cleanSvg)).png().toFile(cleanPath);
+              }
+              pushFrame(cleanPath, cleanFrames);
+            }
+          }
+        }
+
         const currentLineStartFrame = globalFrameCount;
         let nextLineStartFrame;
         if (next) {
           const nextVisualTime = Math.max(0, next.time - effectiveLead);
-          nextLineStartFrame = Math.round((nextVisualTime - audioStartTime) * FPS);
+          nextLineStartFrame = Math.max(currentLineStartFrame + 1, Math.round((nextVisualTime - audioStartTime) * FPS));
         } else {
           const lastDur = cur.duration && cur.duration > 0 ? Math.max(2.5, cur.duration + 0.6) : 3.5;
           nextLineStartFrame = currentLineStartFrame + Math.round(lastDur * FPS);
@@ -3056,18 +3115,32 @@ export async function generateBratVideoMp4({
         const lineLayout = computeBratLayout(lineText);
         const numWords = lineLayout.positionedWords.length;
 
-        // Untuk rap cepat atau baris rapat, tentukan minimum frame adaptif agar tidak mendahului vokal
         const minRequiredFrames = Math.max(1, Math.min(numWords, isFastRapSong ? 2 : 3));
-        const rawAvailFrames = nextLineStartFrame - currentLineStartFrame;
-        const totalLineFrames = Math.max(minRequiredFrames, rawAvailFrames);
+        const rawAvailFrames = Math.max(minRequiredFrames, nextLineStartFrame - currentLineStartFrame);
 
         const hasExactWords = !isLineMode && Boolean(cur.words && cur.words.length > 0);
 
-        if (!isLineMode && numWords > 1 && totalLineFrames >= 2) {
+        let vocalFrames;
+        if (hasExactWords) {
+          const lastWord = cur.words[cur.words.length - 1];
+          const lastWordEnd = (lastWord?.time || cur.time) + (lastWord?.duration || 0.4);
+          const vocalEndVisualTime = Math.max(0, lastWordEnd - effectiveLead);
+          const rawEndFrame = Math.round((vocalEndVisualTime - audioStartTime) * FPS);
+          vocalFrames = Math.max(minRequiredFrames, Math.min(rawAvailFrames, rawEndFrame - currentLineStartFrame + 3));
+        } else {
+          const rawGapSec = rawAvailFrames / FPS;
+          const isLineRapFlow = isRap || (numWords / Math.max(0.4, rawGapSec)) >= 4.5;
+          const naturalSingingDur = Math.max(0.8, Math.min(3.8, numWords * (isLineRapFlow ? 0.18 : 0.32) + 0.3));
+          const vocalDur = cur.duration && cur.duration > 0
+            ? Math.min(rawGapSec, Math.max(0.8, Math.min(cur.duration, 4.2)))
+            : Math.min(rawGapSec, naturalSingingDur);
+          vocalFrames = Math.max(minRequiredFrames, Math.min(rawAvailFrames, Math.round(vocalDur * FPS)));
+        }
+
+        if (!isLineMode && numWords > 1 && rawAvailFrames >= 2) {
           let wordStartFrames = [];
 
           if (hasExactWords) {
-            // Path 1: Sinkronisasi presisi tinggi per nada vokal dari Apple Music / Spotify
             wordStartFrames = [currentLineStartFrame];
             for (let wIdx = 1; wIdx < numWords; wIdx++) {
               let targetTime;
@@ -3079,26 +3152,23 @@ export async function generateBratVideoMp4({
               }
               const wordVisualTime = Math.max(0, targetTime - effectiveLead);
               const rawF = Math.round((wordVisualTime - audioStartTime) * FPS);
-              // Tidak memaksa minF = wordStartFrames[wIdx - 1] + 1; cukup >= agar kata cepat tidak terdorong ke belakang
               const minF = wordStartFrames[wIdx - 1];
-              const maxF = currentLineStartFrame + totalLineFrames - 1;
+              const maxF = currentLineStartFrame + vocalFrames - 1;
               const targetF = Math.min(maxF, Math.max(minF, rawF));
               wordStartFrames.push(targetF);
             }
           } else {
-            // Path 2: Alokasi cerdas bobot suku kata terhadap durasi vokal baris
-            const lineDur = totalLineFrames / FPS;
-            const lineWps = numWords / Math.max(0.4, lineDur);
-            const isLineRapFlow = isRap || lineWps >= 4.5;
-
+            const lineDur = vocalFrames / FPS;
             const wordsPerSec = numWords / Math.max(0.4, lineDur);
+            const isLineRapFlow = isRap || wordsPerSec >= 4.5;
+
             let baseSec;
             if (isLineRapFlow) {
               baseSec = 0.14;
             } else if (wordsPerSec < 1.5) {
-              baseSec = Math.min(0.48, (lineDur * 0.58) / numWords);
+              baseSec = Math.min(0.45, (lineDur * 0.55) / numWords);
             } else {
-              baseSec = 0.26;
+              baseSec = 0.25;
             }
 
             const rawFrames = [];
@@ -3108,7 +3178,7 @@ export async function generateBratVideoMp4({
             }
             const sumNonFinal = rawFrames.reduce((a, b) => a + b, 0);
             const minLastFrames = Math.max(1, Math.round(isLineRapFlow ? 0.12 * FPS : 0.25 * FPS));
-            const maxAllowedForNonFinal = Math.max(numWords - 1, totalLineFrames - minLastFrames);
+            const maxAllowedForNonFinal = Math.max(numWords - 1, vocalFrames - minLastFrames);
 
             if (sumNonFinal > maxAllowedForNonFinal) {
               const scale = maxAllowedForNonFinal / sumNonFinal;
@@ -3140,7 +3210,7 @@ export async function generateBratVideoMp4({
             if (nextStepIdx < numWords) {
               durationFrames = wordStartFrames[nextStepIdx] - currentF;
             } else {
-              durationFrames = (currentLineStartFrame + totalLineFrames) - currentF;
+              durationFrames = (currentLineStartFrame + vocalFrames) - currentF;
             }
             durationFrames = Math.max(1, durationFrames);
 
@@ -3308,9 +3378,51 @@ export async function generateBratVideoMp4({
 
             stepIdx = nextStepIdx;
           }
+
+          // Setelah kata selesai, tahan baris hingga baris berikutnya dimulai (atau bersih jika break panjang)
+          if (globalFrameCount < nextLineStartFrame) {
+            const remainingGap = nextLineStartFrame - globalFrameCount;
+            const fullLineSvg = renderBratSvg(
+              lineLayout,
+              lineLayout.positionedWords,
+              -1,
+              1.0,
+              0.0,
+              curTheme.bg,
+              curTheme.textColor,
+              0.9
+            );
+            if (remainingGap <= 75) {
+              const holdPath = path.join(tmpDir, `base_line_${i}_fullhold.png`);
+              if (!fs.existsSync(holdPath)) {
+                await sharp(Buffer.from(fullLineSvg)).png().toFile(holdPath);
+              }
+              pushFrame(holdPath, remainingGap);
+            } else {
+              const holdFrames = 45;
+              const cleanFrames = remainingGap - holdFrames;
+              const holdPath = path.join(tmpDir, `base_line_${i}_fullhold.png`);
+              if (!fs.existsSync(holdPath)) {
+                await sharp(Buffer.from(fullLineSvg)).png().toFile(holdPath);
+              }
+              pushFrame(holdPath, holdFrames);
+
+              const nextTheme = next ? getLayerTheme(i + 1, theme) : curTheme;
+              const cleanSvg = `<svg width="${lineLayout.canvasSize}" height="${lineLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="${nextTheme.bg}" /></svg>`;
+              const cleanPath = path.join(tmpDir, `clean_gap_after_${i}.png`);
+              if (!fs.existsSync(cleanPath)) {
+                await sharp(Buffer.from(cleanSvg)).png().toFile(cleanPath);
+              }
+              pushFrame(cleanPath, cleanFrames);
+            }
+          }
         } else {
           // Baris utuh (-line) atau baris dengan kata tunggal / durasi sangat singkat
-          if (prevLayerBg !== curTheme.bg && totalLineFrames >= 3) {
+          const isBreak = rawAvailFrames > 75;
+          const displayFrames = isBreak ? 45 : rawAvailFrames;
+          const cleanFrames = isBreak ? rawAvailFrames - 45 : 0;
+
+          if (prevLayerBg !== curTheme.bg && displayFrames >= 3) {
             const blendBg = interpolateHexColor(prevLayerBg, curTheme.bg, 0.70);
             const blendSvg = renderBratSvg(
               lineLayout,
@@ -3338,7 +3450,7 @@ export async function generateBratVideoMp4({
             );
             const linePath = path.join(tmpDir, `base_line_${i}.png`);
             await sharp(Buffer.from(solidSvg)).png().toFile(linePath);
-            pushFrame(linePath, totalLineFrames - 1);
+            pushFrame(linePath, displayFrames - 1);
           } else {
             const lineSvg = renderBratSvg(
               lineLayout,
@@ -3352,31 +3464,17 @@ export async function generateBratVideoMp4({
             );
             const linePath = path.join(tmpDir, `base_line_${i}.png`);
             await sharp(Buffer.from(lineSvg)).png().toFile(linePath);
-            pushFrame(linePath, totalLineFrames);
+            pushFrame(linePath, displayFrames);
           }
-        }
 
-        // Jika ada jeda hening/instrumental sebelum baris berikutnya, tahan teks baris ini hingga baris berikutnya mulai
-        if (next) {
-          const nextVisualTime = Math.max(0, next.time - effectiveLead);
-          const expectedNextStart = Math.round((nextVisualTime - audioStartTime) * FPS);
-          if (globalFrameCount < expectedNextStart) {
-            const gapHoldFrames = expectedNextStart - globalFrameCount;
-            const holdPath = path.join(tmpDir, `gap_hold_${i}.png`);
-            if (!fs.existsSync(holdPath)) {
-              const holdSvg = renderBratSvg(
-                lineLayout,
-                lineLayout.positionedWords,
-                -1,
-                1.0,
-                0.0,
-                curTheme.bg,
-                curTheme.textColor,
-                0.9
-              );
-              await sharp(Buffer.from(holdSvg)).png().toFile(holdPath);
+          if (cleanFrames > 0) {
+            const nextTheme = next ? getLayerTheme(i + 1, theme) : curTheme;
+            const cleanSvg = `<svg width="${lineLayout.canvasSize}" height="${lineLayout.canvasSize}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="${nextTheme.bg}" /></svg>`;
+            const cleanPath = path.join(tmpDir, `clean_line_break_${i}.png`);
+            if (!fs.existsSync(cleanPath)) {
+              await sharp(Buffer.from(cleanSvg)).png().toFile(cleanPath);
             }
-            pushFrame(holdPath, gapHoldFrames);
+            pushFrame(cleanPath, cleanFrames);
           }
         }
 
@@ -3426,12 +3524,8 @@ export async function generateBratVideoMp4({
       const audioDuration = getAudioDuration(audioPath);
       const totalDuration = globalFrameCount / FPS;
       let safeStartTime = Math.max(0, audioStartTime);
-      if (audioDuration > 0) {
-        if (safeStartTime >= audioDuration) {
-          safeStartTime = Math.max(0, audioDuration - totalDuration);
-        } else if (safeStartTime + totalDuration > audioDuration) {
-          safeStartTime = Math.max(0, audioDuration - totalDuration);
-        }
+      if (audioDuration > 0 && safeStartTime >= audioDuration) {
+        safeStartTime = Math.max(0, audioDuration - 5);
       }
 
       const fadeDuration = 0.8;

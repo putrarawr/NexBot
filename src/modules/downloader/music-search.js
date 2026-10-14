@@ -252,17 +252,17 @@ export async function downloadMusicTrack(target, metadata = {}) {
           else if (diff <= 12.0) score -= 10;
           else score -= 55;
 
-          // Prioritaskan channel resmi YouTube Music (- Topic) & Official Audio
+          // Prioritaskan channel resmi YouTube Music (- Topic) & Official Audio studio
           if (/- topic$/i.test(channel.trim())) {
-            score += 50;
+            score += 85;
           }
-          if (/official audio|official lyric|lyric video|audio/i.test(title)) {
-            score += 35;
+          if (/official audio|album version|\b(audio)\b|official lyric/i.test(title)) {
+            score += 45;
           }
 
-          // Beri penalti pada Official Music Video (MV) karena hampir selalu memiliki intro cerita/skit/hening
-          if (/official (music )?video|\bm\/?v\b|video klip|music video/i.test(title)) {
-            score -= (diff <= 2.0 ? 15 : 50);
+          // Beri penalti kuat pada Official Music Video (MV) karena hampir selalu memiliki intro cerita/skit/hening/dialog
+          if (/official (music )?video|\bm\/?v\b|video klip|music video/i.test(title) && !/official audio/i.test(title)) {
+            score -= 65;
           }
 
           if (metadata.artist) {

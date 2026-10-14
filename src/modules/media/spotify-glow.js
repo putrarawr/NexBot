@@ -138,8 +138,10 @@ export function getSegmentWords(seg, nextSegTime) {
   const rawWords = (seg.text || '').trim().split(/\s+/).filter(Boolean);
   if (rawWords.length === 0) return [];
   const lineStart = seg.time;
-  const lineEnd = nextSegTime ? Math.min(seg.time + 6.0, nextSegTime) : seg.time + (seg.duration || 3.5);
-  const totalDuration = Math.max(0.8, lineEnd - lineStart);
+  const rawGap = nextSegTime ? Math.max(0.6, nextSegTime - lineStart) : (seg.duration || 3.0);
+  // Alokasi durasi vokal alami (tempo bernyanyi normal ~0.30s - 0.38s per kata) agar lirik tidak delay
+  const estimatedVocalDur = Math.max(0.9, Math.min(4.2, rawWords.length * 0.34 + 0.35));
+  const totalDuration = Math.min(estimatedVocalDur, Math.max(0.8, rawGap - 0.25));
 
   const totalChars = rawWords.reduce((acc, w) => acc + Math.max(2, w.length), 0);
   let curTime = lineStart;
