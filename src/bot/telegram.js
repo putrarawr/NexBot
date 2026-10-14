@@ -13,6 +13,7 @@ import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, cancelMus
 import { handleSimpklCallback, handleSimpklMessageInterceptor } from '../modules/simpkl/index.js';
 import {
   findSuggestions,
+  findAutoCorrectCommand,
   formatAutocompleteMessage,
   formatPrefixOnlyHelper,
   getPendingAutocomplete,
@@ -569,6 +570,32 @@ export async function handleTelegramMessage(bot, ctx) {
     const command = commands.get(resolvedName);
 
     if (!command) {
+      if (config.autoCorrect !== false) {
+        const autoMatch = findAutoCorrectCommand(cleanCmd, commands, aliases);
+        if (autoMatch && autoMatch.cmd) {
+          logger.bot(`[Telegram] Auto-correct perintah: /${cleanCmd} -> /${autoMatch.correctedName}`);
+          await reply(`[Auto-Correct] Menjalankan perintah <b>/${autoMatch.correctedName}</b>...`);
+          incrementCommandStat(autoMatch.cmd.category);
+          await autoMatch.cmd.execute({
+            sock: adapter,
+            msg: null,
+            jid: String(chatId),
+            sender: `tg:${userId}`,
+            pushName: userName,
+            command: autoMatch.correctedName,
+            args,
+            fullText: args.join(' '),
+            reply,
+            config,
+            prefix: matchedPrefix,
+            ctx,
+            platform: 'telegram',
+            react: () => {},
+          });
+          return;
+        }
+      }
+
       if (config.autocomplete !== false) {
         const suggestions = findSuggestions(cleanCmd, commands);
         if (suggestions.length > 0) {

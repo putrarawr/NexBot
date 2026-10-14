@@ -8,6 +8,7 @@ import { handleAfkInteractions, checkAntilinkMessage } from '../modules/group/in
 import { consumeMusicSelection, downloadMusicTrack, getMusicSelection, sendMusicAudio } from '../modules/downloader/music-search.js';
 import {
   findSuggestions,
+  findAutoCorrectCommand,
   formatAutocompleteMessage,
   formatPrefixOnlyHelper,
   getPendingAutocomplete,
@@ -240,6 +241,32 @@ export async function messageHandler(sock, chatUpdate) {
     const command = commands.get(resolvedName);
 
     if (!command) {
+      // 2a. Auto-Correct Perintah Otomatis (Default: Aktif)
+      if (config.autoCorrect !== false) {
+        const autoMatch = findAutoCorrectCommand(cmdName, commands, aliases);
+        if (autoMatch && autoMatch.cmd) {
+          logger.bot(`Auto-correct perintah: ${prefix}${cmdName} -> ${prefix}${autoMatch.correctedName}`);
+          await reply(`[Auto-Correct] Menjalankan perintah *${prefix}${autoMatch.correctedName}* (karena "${prefix}${cmdName}" tidak ditemukan)...`);
+          incrementCommandStat(autoMatch.cmd.category);
+          await autoMatch.cmd.execute({
+            sock,
+            msg,
+            jid: remoteJid,
+            sender,
+            pushName,
+            command: autoMatch.correctedName,
+            args,
+            fullText: args.join(' '),
+            reply,
+            config,
+            prefix,
+            platform: 'whatsapp',
+            react: (emoji = '👍') => reactWait({ sock, jid: remoteJid, msg, platform: 'whatsapp', emoji }),
+          });
+          return;
+        }
+      }
+
       // Autocomplete & "Did You Mean?" Suggestion
       if (config.autocomplete !== false) {
         const suggestions = findSuggestions(cmdName, commands);

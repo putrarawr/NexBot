@@ -102,6 +102,59 @@ export function findSuggestions(inputQuery, commandMap) {
   return results.slice(0, 5).map((r) => r.cmd);
 }
 
+export function findAutoCorrectCommand(inputQuery, commandMap, aliasesMap = null) {
+  const query = String(inputQuery || '').toLowerCase().trim();
+  if (!query || query.length < 2) return null;
+
+  if (aliasesMap && aliasesMap.has(query)) {
+    const canonicalName = aliasesMap.get(query);
+    const cmd = commandMap.get(canonicalName);
+    if (cmd) return { cmd, correctedName: canonicalName, confidence: 1.0 };
+  }
+
+  let bestCmd = null;
+  let bestDist = Infinity;
+  let bestName = '';
+  let secondBestDist = Infinity;
+
+  const uniqueCmds = new Set();
+  for (const cmd of commandMap.values()) {
+    if (uniqueCmds.has(cmd.name)) continue;
+    uniqueCmds.add(cmd.name);
+
+    const names = [cmd.name.toLowerCase(), ...(cmd.aliases || []).map((a) => a.toLowerCase())];
+    for (const name of names) {
+      const dist = levenshteinDistance(query, name);
+
+      if (dist < bestDist) {
+        secondBestDist = bestDist;
+        bestDist = dist;
+        bestCmd = cmd;
+        bestName = cmd.name;
+      } else if (dist < secondBestDist) {
+        secondBestDist = dist;
+      }
+    }
+  }
+
+  const qLen = query.length;
+  const isConfident = (
+    (qLen <= 3 && bestDist <= 1 && secondBestDist >= 2) ||
+    (qLen >= 4 && qLen <= 6 && bestDist <= 2 && (secondBestDist - bestDist >= 1 || bestDist <= 1)) ||
+    (qLen >= 7 && bestDist <= 3 && (secondBestDist - bestDist >= 1 || bestDist <= 2))
+  );
+
+  if (isConfident && bestCmd) {
+    return {
+      cmd: bestCmd,
+      correctedName: bestName,
+      dist: bestDist,
+    };
+  }
+
+  return null;
+}
+
 export function formatAutocompleteMessage(prefix, inputQuery, suggestions) {
   let text = `[!] Perintah "${prefix}${inputQuery}" tidak ditemukan.\n`;
   text += `[*] Rekomendasi Perintah:\n\n`;

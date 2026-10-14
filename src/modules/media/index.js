@@ -25,6 +25,7 @@ import {
 } from './enhancer.js';
 import { InlineKeyboard } from 'grammy';
 import { downloadMusicTrack } from '../downloader/music-search.js';
+import { levenshteinDistance } from '../../bot/autocomplete.js';
 
 const escapeHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -909,7 +910,15 @@ export function registerMediaCommands() {
         }
 
         if (isSongMode) {
-          await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik untuk "${cleanedText}"...`);
+          const normQuery = cleanedText.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const normDetected = `${lyricsData?.trackName || ''} ${lyricsData?.artistName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const isCorrected = lyricsData?.trackName && normQuery.length >= 3 && !normDetected.includes(normQuery) && normDetected !== normQuery;
+
+          if (isCorrected) {
+            await reply(`[!] [Auto-Correct] Menemukan lagu: *${lyricsData.trackName}* oleh *${lyricsData.artistName || 'Artis'}*\n[!] Sedang menyinkronkan lirik dan membuat video Brat MP4...`);
+          } else {
+            await reply(`[!] Sedang mencari lagu dan menyinkronkan lirik untuk "${cleanedText}"...`);
+          }
           const result = await generateBratVideoMp4({
             songQuery: cleanedText,
             lyricsData,
@@ -1765,13 +1774,23 @@ export async function fetchSongLyricsWithSync(query) {
 
         let trackMatches = 0;
         let artistMatches = 0;
+        const trackWords = normTrack.split(/\s+/).filter(Boolean);
+        const artistWords = normArtist.split(/\s+/).filter(Boolean);
+
         for (const tok of searchTokens) {
           if (normTrack.includes(tok)) {
             score += 30;
             trackMatches++;
+          } else if (tok.length >= 4 && trackWords.some((w) => Math.abs(w.length - tok.length) <= 2 && levenshteinDistance(tok, w) <= (tok.length <= 4 ? 1 : 2))) {
+            score += 24;
+            trackMatches++;
           }
+
           if (normArtist.includes(tok)) {
             score += 20;
+            artistMatches++;
+          } else if (tok.length >= 4 && artistWords.some((w) => Math.abs(w.length - tok.length) <= 2 && levenshteinDistance(tok, w) <= (tok.length <= 4 ? 1 : 2))) {
+            score += 16;
             artistMatches++;
           }
         }
@@ -2051,9 +2070,21 @@ export async function fetchSongLyricsWithSync(query) {
       }
 
       // Skor kecocokan token pencarian pengguna
+      const itemTrackWords = normItemTrack.split(/\s+/).filter(Boolean);
+      const itemArtistWords = normItemArtist.split(/\s+/).filter(Boolean);
+
       for (const tok of searchTokens) {
-        if (normItemTrack.includes(tok)) score += 18;
-        if (normItemArtist.includes(tok)) score += 15;
+        if (normItemTrack.includes(tok)) {
+          score += 18;
+        } else if (tok.length >= 4 && itemTrackWords.some((w) => Math.abs(w.length - tok.length) <= 2 && levenshteinDistance(tok, w) <= (tok.length <= 4 ? 1 : 2))) {
+          score += 14;
+        }
+
+        if (normItemArtist.includes(tok)) {
+          score += 15;
+        } else if (tok.length >= 4 && itemArtistWords.some((w) => Math.abs(w.length - tok.length) <= 2 && levenshteinDistance(tok, w) <= (tok.length <= 4 ? 1 : 2))) {
+          score += 12;
+        }
       }
 
       // Bonus kecocokan judul eksak dengan query pencarian

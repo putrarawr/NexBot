@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { initConfig, getConfig, updateConfig } from '../src/config.js';
 import { initDatabase, addScore, getLeaderboard, getStats, getUser, activeGames } from '../src/utils/database.js';
-import { commands, registerCommand, messageHandler } from '../src/bot/handler.js';
-import { findSuggestions, levenshteinDistance } from '../src/bot/autocomplete.js';
+import { commands, aliases, registerCommand, messageHandler } from '../src/bot/handler.js';
+import { findSuggestions, levenshteinDistance, findAutoCorrectCommand } from '../src/bot/autocomplete.js';
 import { createWebServer } from '../src/web/server.js';
 import { TicTacToeSession } from '../src/modules/game/tictactoe.js';
 import { tebakGambarList, tebakKataList, asahOtakList, generateMathProblem } from '../src/modules/game/questions.js';
@@ -128,7 +128,13 @@ async function runAllTests() {
     assert.ok(tebakGambarList.length >= 10);
     const testItems = tebakGambarList.slice(0, 3);
     for (const item of testItems) {
-      const res = await fetch(item.image, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      let res;
+      try {
+        res = await fetch(item.image, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(5000) });
+      } catch {
+        await new Promise((r) => setTimeout(r, 500));
+        res = await fetch(item.image, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(5000) });
+      }
       assert.equal(res.status, 200, `Image ${item.image} should return HTTP 200`);
     }
   });
@@ -203,6 +209,20 @@ async function runAllTests() {
 
     const typoMatches = findSuggestions('githb', commands);
     assert.ok(typoMatches.some((c) => c.name === 'github'));
+  });
+
+  await test('findAutoCorrectCommand auto-corrects command typos with high confidence', () => {
+    const bratMatch = findAutoCorrectCommand('brtmp4', commands, aliases);
+    assert.ok(bratMatch);
+    assert.equal(bratMatch.correctedName, 'bratmp4');
+
+    const stickerMatch = findAutoCorrectCommand('stikcer', commands, aliases);
+    assert.ok(stickerMatch);
+    assert.equal(stickerMatch.correctedName, 'sticker');
+
+    const spotifyMatch = findAutoCorrectCommand('spotfy', commands, aliases);
+    assert.ok(spotifyMatch);
+    assert.equal(spotifyMatch.correctedName, 'spotify');
   });
 
   await test('Self-Chat Mode processes commands with fromMe: true', async () => {
