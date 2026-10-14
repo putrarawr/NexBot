@@ -32,7 +32,7 @@ import {
   MSG_OWNER_ONLY,
 } from '../src/modules/group/index.js';
 import { imageToWebpSticker, stickerToPng, generateQuoteSticker } from '../src/modules/media/converter.js';
-import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords } from '../src/modules/media/index.js';
+import { generateMemeSticker, generateBratSticker, generateBratVideoSticker, generateBratVideoMp4, parseLrcLyrics, selectLrcWindow, sanitizeLrcMeta, estimateWordWeight, groupSyllablesToWords, parseReffParam, findReffClusters } from '../src/modules/media/index.js';
 import { execSync } from 'node:child_process';
 import { enhanceImageHd, enhanceImageContrast, enhanceImageVintage, enhanceImageNoir } from '../src/modules/media/enhancer.js';
 import { render8BitBar, create8BitProgressTracker } from '../src/utils/progress.js';
@@ -415,6 +415,23 @@ async function runAllTests() {
 
     const reffWin = selectLrcWindow(sampleSegments, { isReff: true });
     assert.ok(reffWin.activeSegments[0].text.includes('reff'));
+
+    const reffParam1 = parseReffParam('Fix You -reff 2');
+    assert.equal(reffParam1.type, 'index');
+    assert.equal(reffParam1.value, 2);
+
+    const reffParamLast = parseReffParam('Laskar Pelangi -reff akhir');
+    assert.equal(reffParamLast.type, 'last');
+
+    const reffParamTime = parseReffParam('Kita Ke Sana -reff 01:25');
+    assert.equal(reffParamTime.type, 'time');
+    assert.equal(reffParamTime.value, 85);
+
+    const customReffWin2 = selectLrcWindow(sampleSegments, { customReff: { type: 'index', value: 2 } });
+    assert.equal(customReffWin2.activeSegments[0].time, 55);
+
+    const customReffWinLast = selectLrcWindow(sampleSegments, { customReff: { type: 'last' } });
+    assert.equal(customReffWinLast.activeSegments[0].time, 55);
 
     const searchWin = selectLrcWindow(sampleSegments, { lyricSearch: 'verse tiga' });
     assert.equal(searchWin.activeSegments[0].text, 'verse tiga');

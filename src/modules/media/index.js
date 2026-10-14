@@ -811,12 +811,14 @@ export function registerMediaCommands() {
       const isIntro = /-intro\b|-awal\b|-depan\b/i.test(text);
       const isFull = /-full\b|-lengkap\b|-semua\b|\bfull lirik\b|\blirik full\b/i.test(text) ||
         command.toLowerCase() === 'bratfull' || command.toLowerCase() === 'bratmp4full';
-      const isReff = /-reff\b|-chorus\b|-ref\b/i.test(text);
       const isRap = /-rap\b/i.test(text);
       const isLineMode = /-line\b|-solid\b/i.test(text);
 
+      const customReff = parseReffParam(text);
+      const isReff = Boolean(customReff);
+
       let fromTime = null;
-      const fromMatch = /-(?:from|start|mulai)[:\s]+([0-9:]+)/i.exec(text);
+      const fromMatch = /-(?:from|start|mulai)[:\s]+([0-9:.]+)/i.exec(text);
       if (fromMatch) {
         fromTime = parseTimeSeconds(fromMatch[1]);
       }
@@ -843,23 +845,28 @@ export function registerMediaCommands() {
       else if (/-black\b/i.test(text)) theme = '-black';
       else if (/-white\b/i.test(text)) theme = '-white';
 
-      const cleanedText = text
-        .replace(/-(?:from|start|mulai)[:\s]+[0-9:]+/gi, '')
-        .replace(/-(?:offset|delay|lead)[:\s]+[-0-9.]+/gi, '')
-        .replace(/(?:lirik:|-lirik\s+)(["']?).+?\1(?:\s+-[a-z0-9]+|\s*$)/gi, '')
-        .replace(/-song\b/gi, '')
-        .replace(/-lagu\b/gi, '')
-        .replace(/-text\b|-teks\b/gi, '')
-        .replace(/-full\b|-lengkap\b|-semua\b/gi, '')
-        .replace(/\bfull lirik\b|\blirik full\b/gi, '')
-        .replace(/-intro\b|-awal\b|-depan\b/gi, '')
-        .replace(/-reff\b|-chorus\b|-ref\b/gi, '')
-        .replace(/-rap\b/gi, '')
-        .replace(/-line\b|-solid\b/gi, '')
-        .replace(/-type\b|-typing\b/gi, '')
-        .replace(/-green\b/gi, '')
-        .replace(/-black\b/gi, '')
-        .replace(/-white\b/gi, '')
+      let rawCleaned = text;
+      if (customReff && customReff.raw) {
+        rawCleaned = rawCleaned.replace(customReff.raw, ' ');
+      }
+      const cleanedText = rawCleaned
+        .replace(/-(?:from|start|mulai)[:\s]+[0-9:.]+/gi, ' ')
+        .replace(/-(?:offset|delay|lead)[:\s]+[-0-9.]+/gi, ' ')
+        .replace(/(?:lirik:|-lirik\s+)(["']?).+?\1(?:\s+-[a-z0-9]+|\s*$)/gi, ' ')
+        .replace(/-song\b/gi, ' ')
+        .replace(/-lagu\b/gi, ' ')
+        .replace(/-text\b|-teks\b/gi, ' ')
+        .replace(/-full\b|-lengkap\b|-semua\b/gi, ' ')
+        .replace(/\bfull lirik\b|\blirik full\b/gi, ' ')
+        .replace(/-intro\b|-awal\b|-depan\b/gi, ' ')
+        .replace(/-reff\b|-chorus\b|-ref\b/gi, ' ')
+        .replace(/-rap\b/gi, ' ')
+        .replace(/-line\b|-solid\b/gi, ' ')
+        .replace(/-type\b|-typing\b/gi, ' ')
+        .replace(/-green\b/gi, ' ')
+        .replace(/-black\b/gi, ' ')
+        .replace(/-white\b/gi, ' ')
+        .replace(/\s+/g, ' ')
         .trim();
 
       const hasSongSectionFlag = isFull || isReff || isRap || isIntro || fromTime !== null || !!lyricSearch;
@@ -870,11 +877,15 @@ export function registerMediaCommands() {
           `[!] Format penggunaan Brat Video MP4:\n\n` +
           `1. Sinkron Lirik Lagu (Default Otomatis Bagian Reff/Viral/Rap, Kata per Kata Smooth):\n` +
           `<code>${prefix}bratmp4 Fix You Coldplay</code> atau <code>${prefix}bratmp4 The Cure Boys Don't Cry -green</code>\n\n` +
-          `2. Request Bagian Lagu:\n` +
+          `2. Request Bagian Lagu & Custom Reff:\n` +
+          `• Reff Otomatis: <code>${prefix}bratmp4 Judul Lagu -reff</code>\n` +
+          `• Reff Urutan (1, 2, 3): <code>${prefix}bratmp4 Judul Lagu -reff 2</code>\n` +
+          `• Reff Terakhir / Puncak: <code>${prefix}bratmp4 Judul Lagu -reff akhir</code>\n` +
+          `• Reff dari Menit Tertentu: <code>${prefix}bratmp4 Judul Lagu -reff 01:25</code>\n` +
+          `• Reff dari Kutipan Lirik: <code>${prefix}bratmp4 Judul Lagu -reff "lirik awal"</code>\n` +
           `• Full Lirik Lagu: <code>${prefix}bratmp4 Judul Lagu -full</code> atau <code>${prefix}bratfull Judul Lagu</code>\n` +
-          `• Reff/Chorus: <code>${prefix}bratmp4 Laskar Pelangi -reff</code>\n` +
-          `• Bagian Rap: <code>${prefix}bratmp4 Eminem Godzilla -rap</code>\n` +
-          `• Dari awal mula/intro: <code>${prefix}bratmp4 Judul Lagu -intro</code>\n` +
+          `• Bagian Rap Cepat: <code>${prefix}bratmp4 Eminem Godzilla -rap</code>\n` +
+          `• Dari awal lagu / intro: <code>${prefix}bratmp4 Judul Lagu -intro</code>\n` +
           `• Menit tertentu: <code>${prefix}bratmp4 Judul Lagu -from 01:25</code>\n` +
           `• Teks baris utuh: <code>${prefix}bratmp4 Judul Lagu -line</code>\n` +
           `• Penyesuaian delay: <code>${prefix}bratmp4 Judul Lagu -offset -0.5</code>\n\n` +
@@ -905,6 +916,7 @@ export function registerMediaCommands() {
             theme,
             isFull,
             isReff,
+            customReff,
             isRap,
             isIntro,
             preferViral: !isIntro && !isFull && !isReff && !isRap && fromTime === null && !lyricSearch,
@@ -1580,7 +1592,7 @@ export async function fetchSongLyricsWithSync(query) {
   const searchTokens = normalizeFuzzy(cleanSearchTerm).split(/\s+/).filter((t) => t.length > 1);
 
   // Deteksi kemungkinan format pemisah "Judul - Artis" atau "Artis - Judul"
-  const rawParts = clean.split(/\s*[-–—|/]\s*|\s+by\s+|\s+feat\.?\s+|\s+ft\.?\s+/i).map((s) => s.trim()).filter(Boolean);
+  const rawParts = clean.split(/\s+[-–—|]\s+/).map((s) => s.trim()).filter(Boolean);
   const userCand1 = rawParts.length >= 2 ? { track: rawParts[0], artist: rawParts.slice(1).join(' ') } : null;
   const userCand2 = rawParts.length >= 2 ? { track: rawParts[rawParts.length - 1], artist: rawParts.slice(0, -1).join(' ') } : null;
 
@@ -1615,13 +1627,21 @@ export async function fetchSongLyricsWithSync(query) {
         const normTrack = normalizeFuzzy(cleanTrack);
         const normArtist = normalizeFuzzy(item.artistName);
         const combinedText = `${rawTrack} ${item.artistName || ''}`.toLowerCase();
+        const normSearch = normalizeFuzzy(cleanSearchTerm);
+
+        // Bonus kecocokan judul eksak atau diawali query pencarian
+        if (normTrack === normSearch) {
+          score += 60;
+        } else if (normTrack.startsWith(normSearch) || normSearch.startsWith(normTrack)) {
+          score += 40;
+        }
 
         // Utamakan lagu asli tanpa subtitle/remix/refix dibanding versi alternatif
         const subtitlePresent = hasNonFeatSubtitle(rawTrack);
         if (!subtitlePresent) {
-          score += 45;
+          score += 40;
         } else {
-          score -= 45;
+          score -= 30;
         }
 
         let trackMatches = 0;
@@ -1643,11 +1663,11 @@ export async function fetchSongLyricsWithSync(query) {
         }
 
         // Jika user sengaja menulis "Judul - Artis", pastikan keduanya ada kecocokan.
-        // Jangan beri penalti jika user hanya mencari judul panjang tanpa nama artis (misal: "kita ke sana", "birds of a feather").
-        if ((userCand1 || userCand2) && artistMatches === 0) {
-          score -= 60;
-        } else if (searchTokens.length >= 3 && artistMatches === 0 && trackMatches < 2) {
-          score -= 40;
+        // Jangan beri penalti jika user hanya mencari judul panjang tanpa nama artis.
+        if ((userCand1 || userCand2) && artistMatches === 0 && trackMatches === 0) {
+          score -= 50;
+        } else if (searchTokens.length >= 3 && artistMatches === 0 && trackMatches < 2 && normTrack !== normSearch) {
+          score -= 35;
         }
 
         if (userCand1) {
@@ -1893,9 +1913,17 @@ export async function fetchSongLyricsWithSync(query) {
         if (normItemArtist.includes(tok)) score += 15;
       }
 
+      // Bonus kecocokan judul eksak dengan query pencarian
+      const normSearch = normalizeFuzzy(cleanSearchTerm);
+      if (normItemTrack === normSearch) {
+        score += 55;
+      } else if (normItemTrack.startsWith(normSearch)) {
+        score += 35;
+      }
+
       // Utamakan secara kuat entri yang memiliki syncedLyrics dibanding plainLyrics
       if (item.syncedLyrics) {
-        score += 65;
+        score += 75;
       }
 
       return { item, score };
@@ -1992,8 +2020,133 @@ export function parseTimeSeconds(str) {
     const s = parseFloat(parts[1]);
     if (!isNaN(m) && !isNaN(s)) return m * 60 + s;
   }
+  if (parts.length === 1 && /^\d+\.\d+$/.test(clean)) {
+    const dotParts = clean.split('.');
+    if (dotParts.length === 2 && dotParts[1].length <= 2) {
+      const m = parseFloat(dotParts[0]);
+      const s = parseFloat(dotParts[1]);
+      if (s < 60) return m * 60 + s;
+    }
+  }
   const val = parseFloat(clean);
   return !isNaN(val) ? val : null;
+}
+
+export function parseReffParam(text) {
+  if (!text || typeof text !== 'string') return null;
+
+  // 1. Cek parameter kutipan lirik reff: -reff "..." atau -reff '...'
+  const quoteMatch = /-(?:reff|chorus|ref)[:\s]+(["'])(.+?)\1/i.exec(text);
+  if (quoteMatch) {
+    return { type: 'text', value: quoteMatch[2].trim(), raw: quoteMatch[0] };
+  }
+
+  // 2. Cek parameter timestamp: -startreff 01:25 atau -reff[:\s]+(\d{1,2}[:.]\d{2})
+  const timeMatch = /-(?:startreff|reffstart|chorusstart)[:\s]+([0-9:.]+)/i.exec(text) ||
+    /-(?:reff|chorus|ref)[:\s]+(\d{1,2}[:.]\d{2}(?:\.\d+)?)/i.exec(text);
+  if (timeMatch) {
+    const sec = parseTimeSeconds(timeMatch[1]);
+    if (sec !== null && !isNaN(sec) && sec >= 0) {
+      return { type: 'time', value: sec, raw: timeMatch[0] };
+    }
+  }
+
+  // 3. Cek parameter reff akhir / last / climax: -reff akhir
+  const lastMatch = /-(?:reff|chorus|ref)[:\s]+(akhir|last|climax|puncak)\b/i.exec(text);
+  if (lastMatch) {
+    return { type: 'last', raw: lastMatch[0] };
+  }
+
+  // 4. Cek parameter nomor reff: -reff 1, -reff 2, -reff:2, -chorus 3
+  const numMatch = /-(?:reff|chorus|ref)[:\s]+(\d+)\b/i.exec(text);
+  if (numMatch) {
+    const idx = parseInt(numMatch[1], 10);
+    if (idx > 15) {
+      return { type: 'time', value: idx, raw: numMatch[0] };
+    }
+    return { type: 'index', value: idx, raw: numMatch[0] };
+  }
+
+  // 5. Cek flag reff standar: -reff, -chorus, -ref
+  const plainMatch = /-(?:reff|chorus|ref)\b/i.exec(text);
+  if (plainMatch) {
+    return { type: 'auto', raw: plainMatch[0] };
+  }
+
+  return null;
+}
+
+export function findReffClusters(segments, songParts = null) {
+  if (!segments || segments.length === 0) return [];
+
+  // Jika tersedia struktur lagu resmi dari Apple Music metadata (metadata.songParts)
+  if (Array.isArray(songParts) && songParts.length > 0) {
+    const chorusParts = songParts.filter((p) => p && typeof p.name === 'string' && /chorus|refrain|reff/i.test(p.name));
+    if (chorusParts.length > 0) {
+      const clusters = [];
+      for (let cp = 0; cp < chorusParts.length; cp++) {
+        const part = chorusParts[cp];
+        const partTimeSec = (part.time || 0) / 1000;
+        let closestIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < segments.length; i++) {
+          const diff = Math.abs(segments[i].time - partTimeSec);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = i;
+          }
+        }
+        clusters.push({
+          startIndex: closestIdx,
+          startTime: segments[closestIdx].time,
+          firstText: segments[closestIdx].text,
+          lastTime: segments[closestIdx].time + ((part.duration || 10000) / 1000),
+          count: 2,
+          isOfficial: true,
+        });
+      }
+      if (clusters.length > 0) return clusters;
+    }
+  }
+
+  // Algoritma clustering lirik berulang (Chorus Repeating Detection)
+  const textCounts = new Map();
+  segments.forEach((s) => {
+    const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    if (clean.length > 5) {
+      textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
+    }
+  });
+
+  const totalSongDuration = segments[segments.length - 1].time;
+  const minReffTime = totalSongDuration * 0.12;
+
+  const clusters = [];
+  let currentCluster = null;
+
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+    const isRepeat = clean.length > 5 && (textCounts.get(clean) || 0) > 1;
+
+    if (s.time >= minReffTime && isRepeat) {
+      if (!currentCluster || (s.time - currentCluster.lastTime > 18)) {
+        currentCluster = {
+          startIndex: i,
+          startTime: s.time,
+          firstText: s.text,
+          lastTime: s.time,
+          count: 1,
+        };
+        clusters.push(currentCluster);
+      } else {
+        currentCluster.lastTime = s.time;
+        currentCluster.count++;
+      }
+    }
+  }
+
+  return clusters;
 }
 
 export function selectLrcWindow(segments, {
@@ -2004,6 +2157,8 @@ export function selectLrcWindow(segments, {
   preferViral = false,
   fromTime = null,
   lyricSearch = '',
+  customReff = null,
+  songParts = null,
   maxDuration = 35,
 } = {}) {
   if (!segments || segments.length === 0) {
@@ -2087,65 +2242,71 @@ export function selectLrcWindow(segments, {
       }
     }
     partLabel = 'Bagian Rap / Verse Cepat (30s)';
-  } else if (isReff || preferViral) {
-    let fastRapCandidate = -1;
-    let peakRapWps = 0;
-    if (preferViral && !isReff) {
-      for (let i = 0; i < segments.length - 1; i++) {
-        const curWindow = Math.min(3, segments.length - i);
-        let totalWords = 0;
-        for (let w = 0; w < curWindow; w++) {
-          totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
-        }
-        const endTime = (i + curWindow < segments.length)
-          ? segments[i + curWindow].time
-          : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
-        const dur = Math.max(1.0, endTime - segments[i].time);
-        const wps = totalWords / dur;
-        if (wps > peakRapWps && segments[i].time > 8 && totalWords >= 10) {
-          peakRapWps = wps;
-          fastRapCandidate = i;
-        }
-      }
-    }
+  } else if (isReff || customReff || preferViral) {
+    const totalSongDuration = segments[segments.length - 1].time;
+    const reffClusters = findReffClusters(segments, songParts);
 
-    if (peakRapWps >= 5.5 && fastRapCandidate !== -1) {
-      startIndex = fastRapCandidate;
-      if (startIndex > 0) {
-        const prev = segments[startIndex - 1];
-        const prevDur = Math.max(0.4, segments[startIndex].time - prev.time);
-        const prevWords = (prev.text || '').trim().split(/\s+/).length;
-        if ((prevWords / prevDur) >= 3.8 && prevDur <= 2.2) {
-          startIndex = startIndex - 1;
-        }
-      }
-      partLabel = 'Bagian Rap / Verse Viral (30s)';
-    } else {
-      const textCounts = new Map();
-      segments.forEach((s) => {
-        const clean = s.text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-        if (clean.length > 5) {
-          textCounts.set(clean, (textCounts.get(clean) || 0) + 1);
+    if (customReff && customReff.type === 'time') {
+      let closestIdx = 0;
+      let minDiff = Infinity;
+      segments.forEach((s, idx) => {
+        const diff = Math.abs(s.time - customReff.value);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestIdx = idx;
         }
       });
-
-      const totalSongDuration = segments[segments.length - 1].time;
-      const minReffTime = totalSongDuration * 0.18;
-      let bestReffIdx = -1;
-
-      for (let i = 0; i < segments.length; i++) {
-        const clean = segments[i].text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-        if (segments[i].time >= minReffTime && (textCounts.get(clean) || 0) > 1) {
-          bestReffIdx = i;
-          break;
-        }
+      startIndex = closestIdx;
+      const m = Math.floor(customReff.value / 60);
+      const s = Math.floor(customReff.value % 60);
+      partLabel = `Reff Menit ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')} (30s)`;
+    } else if (customReff && customReff.type === 'text') {
+      const q = customReff.value.toLowerCase().trim();
+      const foundIdx = segments.findIndex((s) => s.text.toLowerCase().includes(q));
+      if (foundIdx !== -1) {
+        startIndex = foundIdx;
+        partLabel = `Reff ("${segments[foundIdx].text.slice(0, 20)}...")`;
+      } else if (reffClusters.length > 0) {
+        startIndex = reffClusters[0].startIndex;
+        partLabel = 'Reff / Chorus (30s)';
       }
-
-      if (bestReffIdx !== -1) {
-        startIndex = bestReffIdx;
+    } else if (customReff && customReff.type === 'index') {
+      if (reffClusters.length > 0) {
+        const targetIdx = Math.max(0, Math.min(customReff.value - 1, reffClusters.length - 1));
+        startIndex = reffClusters[targetIdx].startIndex;
+        partLabel = `Reff ${targetIdx + 1} (30s)`;
+      } else {
+        const targetTime = (customReff.value / (customReff.value + 1)) * totalSongDuration;
+        let closestIdx = 0;
+        let minDiff = Infinity;
+        segments.forEach((s, idx) => {
+          const diff = Math.abs(s.time - targetTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestIdx = idx;
+          }
+        });
+        startIndex = closestIdx;
+        partLabel = `Reff ${customReff.value} (30s)`;
+      }
+    } else if (customReff && customReff.type === 'last') {
+      if (reffClusters.length > 0) {
+        const lastCluster = reffClusters[reffClusters.length - 1];
+        startIndex = lastCluster.startIndex;
+        partLabel = 'Reff Terakhir / Climax (30s)';
+      } else {
+        const targetTime = totalSongDuration * 0.65;
+        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+        partLabel = 'Reff Terakhir (30s)';
+      }
+    } else if (isReff || (customReff && customReff.type === 'auto')) {
+      if (reffClusters.length >= 2 && reffClusters[0].count <= 1) {
+        startIndex = reffClusters[1].startIndex;
+        partLabel = 'Reff 2 (Chorus Utama) (30s)';
+      } else if (reffClusters.length > 0) {
+        startIndex = reffClusters[0].startIndex;
         partLabel = 'Reff / Chorus (30s)';
       } else {
-        // Jika lirik tidak berulang persis, periksa apakah ada flow rap cepat
         let highestWps = 0;
         let rapIdx = -1;
         for (let i = 0; i < segments.length - 1; i++) {
@@ -2164,7 +2325,6 @@ export function selectLrcWindow(segments, {
             rapIdx = i;
           }
         }
-
         if (highestWps >= 4.0 && rapIdx !== -1) {
           startIndex = rapIdx;
           partLabel = 'Bagian Rap / Verse Cepat (30s)';
@@ -2174,10 +2334,54 @@ export function selectLrcWindow(segments, {
           partLabel = 'Bagian Viral / Puncak Lagu (30s)';
         }
       }
+    } else {
+      // preferViral (default auto-pick)
+      let fastRapCandidate = -1;
+      let peakRapWps = 0;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const curWindow = Math.min(3, segments.length - i);
+        let totalWords = 0;
+        for (let w = 0; w < curWindow; w++) {
+          totalWords += (segments[i + w].text || '').trim().split(/\s+/).length;
+        }
+        const endTime = (i + curWindow < segments.length)
+          ? segments[i + curWindow].time
+          : (segments[segments.length - 1].time + (segments[segments.length - 1].duration || 2.5));
+        const dur = Math.max(1.0, endTime - segments[i].time);
+        const wps = totalWords / dur;
+        if (wps > peakRapWps && segments[i].time > 8 && totalWords >= 10) {
+          peakRapWps = wps;
+          fastRapCandidate = i;
+        }
+      }
+
+      if (peakRapWps >= 5.5 && fastRapCandidate !== -1) {
+        startIndex = fastRapCandidate;
+        if (startIndex > 0) {
+          const prev = segments[startIndex - 1];
+          const prevDur = Math.max(0.4, segments[startIndex].time - prev.time);
+          const prevWords = (prev.text || '').trim().split(/\s+/).length;
+          if ((prevWords / prevDur) >= 3.8 && prevDur <= 2.2) {
+            startIndex = startIndex - 1;
+          }
+        }
+        partLabel = 'Bagian Rap / Verse Viral (30s)';
+      } else if (reffClusters.length > 0) {
+        if (reffClusters.length >= 2 && reffClusters[0].count <= 1) {
+          startIndex = reffClusters[1].startIndex;
+        } else {
+          startIndex = reffClusters[0].startIndex;
+        }
+        partLabel = 'Reff / Puncak Lagu (30s)';
+      } else {
+        const targetTime = totalSongDuration * 0.30;
+        startIndex = Math.max(0, segments.findIndex((s) => s.time >= targetTime));
+        partLabel = 'Bagian Viral / Puncak Lagu (30s)';
+      }
     }
   }
 
-  const isExplicitTarget = isFull || isRap || isIntro || fromTime !== null || !!lyricSearch;
+  const isExplicitTarget = isFull || isRap || isIntro || fromTime !== null || !!lyricSearch || !!customReff;
   if (!isExplicitTarget && startIndex > 0 && segments.length > 3) {
     const lastTime = segments[segments.length - 1].time;
     const remainingTime = lastTime - segments[startIndex].time;
@@ -2242,6 +2446,7 @@ export async function generateBratVideoMp4({
   theme = '',
   isFull = false,
   isReff = false,
+  customReff = null,
   isRap = false,
   isIntro = false,
   preferViral = false,
@@ -2299,13 +2504,14 @@ export async function generateBratVideoMp4({
       return false;
     })();
 
-    const searchTarget = `${lyricsData.artistName} - ${lyricsData.trackName}`;
+    const validArtist = (lyricsData.artistName && lyricsData.artistName !== 'Unknown Artist') ? lyricsData.artistName : '';
+    const searchTarget = validArtist ? `${validArtist} - ${lyricsData.trackName}` : (lyricsData.trackName || cleanQuery);
     let musicTrack = null;
     try {
       musicTrack = await downloadMusicTrack(searchTarget, {
         targetDuration: lyricsData.duration,
         title: lyricsData.trackName,
-        artist: lyricsData.artistName,
+        artist: validArtist,
       });
     } catch {
       musicTrack = await downloadMusicTrack(cleanQuery, {
@@ -2325,11 +2531,13 @@ export async function generateBratVideoMp4({
       const windowInfo = selectLrcWindow(segments, {
         isFull,
         isReff,
+        customReff,
         isRap,
         isIntro,
         preferViral,
         fromTime,
         lyricSearch,
+        songParts: lyricsData.metadata?.songParts,
         maxDuration: 35,
       });
 
